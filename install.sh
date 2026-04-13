@@ -28,7 +28,7 @@ echo ""
 # ── 설치 경로 결정 ──────────────────────────────────────────
 INSTALL_DIR="${1:-${HARNESS_DASHBOARD_PATH:-$HOME/.harness-dashboard}}"
 REPO_URL="https://github.com/JasonJunseokLee/harness-dashboard.git"
-SKILL_DIR="$HOME/.claude/skills"
+SKILL_DIR="$HOME/.claude/commands"
 SKILL_FILE="$SKILL_DIR/harness.md"
 PORT=3748
 
