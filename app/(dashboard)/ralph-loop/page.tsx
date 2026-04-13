@@ -2,6 +2,10 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import TerminalStream from "@/app/components/TerminalStream";
+import RefinementPanel from "@/app/components/RefinementPanel";
+import VersionHistoryPanel from "@/app/components/VersionHistoryPanel";
+import VersionDiffViewer from "@/app/components/VersionDiffViewer";
+import { useAIRefinement } from "@/app/lib/useAIRefinement";
 import type { RalphConfig } from "@/app/api/ralph-loop/route";
 
 // ─── 탭 타입 ─────────────────────────────────────────────────
@@ -12,6 +16,14 @@ const MODELS = [
   { id: "claude-opus-4-6",    label: "Opus 4.6  (최고 품질)" },
   { id: "claude-sonnet-4-6",  label: "Sonnet 4.6 (균형)" },
   { id: "claude-haiku-4-5-20251001", label: "Haiku 4.5  (빠름)" },
+];
+
+// ─── Ralph Loop 프리셋 ──────────────────────────────────────
+const RALPH_LOOP_PRESETS = [
+  "루프 조건 엄격하게",
+  "실패 처리 추가",
+  "성공 기준 명확화",
+  "품질 게이트 강화",
 ];
 
 // ─── SHIP/REVISE 이벤트 파싱 ─────────────────────────────────
@@ -109,6 +121,39 @@ export default function RalphLoopPage() {
   const [bulletinEvents, setBulletinEvents] = useState<BulletinEvent[]>([]);
   const [hasRun, setHasRun] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // AI 수정 기능 (diff 뷰어용)
+  const [showDiff, setShowDiff] = useState(false);
+  const [diffV1, setDiffV1] = useState("");
+  const [diffV2, setDiffV2] = useState("");
+
+  // useAIRefinement 훅 통합 (JSON 형식)
+  // config를 JSON 문자열로 직렬화하여 AI 수정 요청 시 전송
+  const {
+    handleRefine,
+    handleRestore,
+    handleSelectVersion,
+    isRefining,
+    refineProgress,
+    currentVersion,
+    versionRefresh,
+    error: refinementError,
+  } = useAIRefinement({
+    phase: "ralph-loop",
+    format: "json",
+    currentContent: config,
+    onContentChange: setConfig,
+    // config 객체를 JSON 문자열로 직렬화
+    serializer: (cfg: RalphConfig) => JSON.stringify(cfg, null, 2),
+    // JSON 문자열을 config 객체로 파싱
+    parser: (text: string) => {
+      try {
+        return JSON.parse(text) as RalphConfig;
+      } catch (err) {
+        throw new Error(`Ralph Loop 설정 파싱 실패: ${err instanceof Error ? err.message : '알 수 없는 오류'}`);
+      }
+    },
+  });
 
   // ── 초기 로드 ──────────────────────────────────────────────
   useEffect(() => {
@@ -257,6 +302,13 @@ export default function RalphLoopPage() {
           </div>
         </div>
 
+        {/* 에러 메시지 */}
+        {(refinementError) && (
+          <div className="bg-red-950 border border-red-800 rounded-xl p-4 mb-6 text-red-300 text-sm">
+            {refinementError}
+          </div>
+        )}
+
         {/* 탭 */}
         <div className="flex gap-1 mb-6 bg-zinc-900 rounded-lg p-1 border border-zinc-800">
           {([
@@ -279,7 +331,9 @@ export default function RalphLoopPage() {
 
         {/* ── 탭: 설계 ── */}
         {tab === "design" && (
-          <div className="space-y-5">
+          <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-4">
+            {/* 왼쪽: 설계 폼 */}
+            <div className="space-y-5">
 
             {/* 루프 목표 */}
             <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-5 space-y-3">
@@ -443,6 +497,37 @@ export default function RalphLoopPage() {
                     />
                   ))}
                 </div>
+              )}
+            </div>
+            </div>
+
+            {/* 오른쪽: AI 수정 + 버전 관리 패널 */}
+            <div className="space-y-4">
+              {/* AI 수정 요청 패널 */}
+              <RefinementPanel
+                onRefine={handleRefine}
+                isRefining={isRefining}
+                progressText={refineProgress}
+                presets={RALPH_LOOP_PRESETS}
+              />
+
+              {/* 버전 히스토리 패널 */}
+              <VersionHistoryPanel
+                phase="ralph-loop"
+                onSelectVersion={handleSelectVersion}
+                onRestore={handleRestore}
+                currentVersion={currentVersion}
+                refreshTrigger={versionRefresh}
+              />
+
+              {/* Diff 뷰어 */}
+              {showDiff && diffV1 && diffV2 && (
+                <VersionDiffViewer
+                  phase="ralph-loop"
+                  v1={diffV1}
+                  v2={diffV2}
+                  onClose={() => setShowDiff(false)}
+                />
               )}
             </div>
           </div>
