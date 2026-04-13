@@ -16,8 +16,10 @@ function loadContext(): string {
   if (!files.length) return ''
   return files.map(f => {
     try {
-      const content = fs.readFileSync(path.join(CONTEXT_DIR, f), 'utf-8')
-      return `=== ${f} ===\n${content}`
+      // null byte 제거 후 전달 (바이너리 혼입 방지)
+      const raw = fs.readFileSync(path.join(CONTEXT_DIR, f), 'utf-8')
+      const clean = raw.replace(/\0/g, '')
+      return `=== ${f} ===\n${clean}`
     } catch {
       return ''
     }
@@ -27,11 +29,13 @@ function loadContext(): string {
 // claude -p 를 SSE로 스트리밍 실행
 function runClaudeSSE(prompt: string, controller: ReadableStreamDefaultController) {
   const enc = new TextEncoder()
-  // 클라이언트 연결이 끊겨 controller가 닫혀 있을 수 있어 try-catch 처리
+  // 클라이언트가 연결을 끊으면 controller가 닫혀 있을 수 있어 try-catch로 처리
   const send = (data: object) => {
     try {
       controller.enqueue(enc.encode(`data: ${JSON.stringify(data)}\n\n`))
-    } catch { /* controller already closed */ }
+    } catch {
+      // controller already closed (client disconnected)
+    }
   }
   const close = () => {
     try { controller.close() } catch { /* already closed */ }
@@ -45,7 +49,7 @@ function runClaudeSSE(prompt: string, controller: ReadableStreamDefaultControlle
   proc.stdout.on('data', (chunk: Buffer) => send({ type: 'text', text: chunk.toString() }))
   proc.stderr.on('data', (chunk: Buffer) => {
     const msg = chunk.toString().trim()
-    if (msg) send({ type: 'error', text: msg })
+    if (msg) send({ type: 'text', text: `▸ ${msg}\n` })
   })
   proc.on('close', (code: number) => {
     send({ type: 'done', code })

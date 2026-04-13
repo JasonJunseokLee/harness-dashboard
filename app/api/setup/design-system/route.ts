@@ -668,20 +668,23 @@ export default function FormPage() {
       const send = (data: object) =>
         controller.enqueue(enc.encode(`data: ${JSON.stringify(data)}\n\n`))
 
-      const proc = spawn('claude', ['-p', prompt], {
+      // 긴 프롬프트는 ARG_MAX 한계를 피해 stdin으로 전달
+      const proc = spawn('claude', ['--print'], {
         env: process.env,
-        stdio: ['ignore', 'pipe', 'pipe'],
+        stdio: ['pipe', 'pipe', 'pipe'],
       })
+      proc.stdin?.write(prompt)
+      proc.stdin?.end()
 
       proc.stdout.on('data', (chunk: Buffer) => {
         const text = chunk.toString()
         fullContent += text
-        send({ type: 'text', text })
+        try { send({ type: 'text', text }) } catch { /* closed */ }
       })
 
       proc.stderr.on('data', (chunk: Buffer) => {
         const msg = chunk.toString().trim()
-        if (msg) send({ type: 'error', text: msg })
+        if (msg) try { send({ type: 'text', text: `▸ ${msg}\n` }) } catch { /* closed */ }
       })
 
       proc.on('close', () => {
@@ -696,13 +699,13 @@ export default function FormPage() {
           : {}
         fs.writeFileSync(setupFile, JSON.stringify({ ...existing, designSystem: true, updatedAt: new Date().toISOString() }, null, 2))
 
-        send({ type: 'done' })
-        controller.close()
+        try { send({ type: 'done' }) } catch { /* closed */ }
+        try { controller.close() } catch { /* already closed */ }
       })
 
       proc.on('error', (err: Error) => {
-        send({ type: 'error', text: err.message })
-        controller.close()
+        try { send({ type: 'text', text: `▸ 오류: ${err.message}\n` }) } catch { /* closed */ }
+        try { controller.close() } catch { /* already closed */ }
       })
     },
   })

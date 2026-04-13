@@ -156,6 +156,7 @@ ${analysisSection ? `${analysisSection}\n` : ''}${contextText ? `[원본 참고 
         send({ type: 'text', text })
       })
 
+      // stderr = claude 상태 메시지 → ▸ 접두사로 text 스트림에 합침 (dim 표시용)
       proc.stderr.on('data', (chunk: Buffer) => {
         const msg = chunk.toString().trim()
         if (msg) send({ type: 'text', text: `▸ ${msg}\n` })
@@ -177,12 +178,12 @@ ${analysisSection ? `${analysisSection}\n` : ''}${contextText ? `[원본 참고 
         } catch {
           send({ type: 'done', code, error: '파싱 실패 — 원문을 확인하세요' })
         }
-        controller.close()
+        try { controller.close() } catch { /* already closed */ }
       })
 
       proc.on('error', (err: Error) => {
-        send({ type: 'error', text: err.message })
-        controller.close()
+        send({ type: 'text', text: `▸ 오류: ${err.message}\n` })
+        try { controller.close() } catch { /* already closed */ }
       })
     },
   })

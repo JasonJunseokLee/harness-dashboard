@@ -2,12 +2,9 @@ import { NextRequest, NextResponse } from 'next/server'
 import * as fs from 'fs'
 import * as path from 'path'
 import { spawn } from 'child_process'
+import { getHarnessDir } from '@/app/lib/project-path'
 
 export const runtime = 'nodejs'
-
-// ─── 경로 설정 ────────────────────────────────────────────────
-const HARNESS = path.join(process.cwd(), '.harness')
-const TUNED_DIR = path.join(HARNESS, 'templates') // 튜닝된 버전 저장 위치
 
 // 하네스 엔지니어링 템플릿 폴더 (환경변수 또는 기본 경로)
 const TEMPLATE_ROOT = process.env.HARNESS_TEMPLATE_PATH
@@ -70,6 +67,8 @@ export const TEMPLATES = [
 
 // ─── GET: 전체 목록 + 선택된 파일 내용 반환 ──────────────────
 export async function GET(req: NextRequest) {
+  // 요청마다 현재 프로젝트 경로를 동적으로 조회 (프로젝트 전환 대응)
+  const TUNED_DIR = path.join(getHarnessDir(), 'templates')
   const { searchParams } = new URL(req.url)
   const id = searchParams.get('id')
 
@@ -114,6 +113,10 @@ export async function POST(req: NextRequest) {
   if (!originalContent) {
     return new Response(JSON.stringify({ error: '템플릿 파일을 읽을 수 없습니다.' }), { status: 500 })
   }
+
+  // 요청마다 현재 프로젝트 경로 동적 조회
+  const HARNESS = getHarnessDir()
+  const TUNED_DIR = path.join(HARNESS, 'templates')
 
   // 프로젝트 컨텍스트 수집
   const project = loadJson(path.join(HARNESS, 'project.json'))
@@ -199,13 +202,18 @@ ${originalContent}
 
   const stream = new ReadableStream({
     start(controller) {
-      const send = (data: object) =>
-        controller.enqueue(enc.encode(`data: ${JSON.stringify(data)}\n\n`))
+      const send = (data: object) => {
+        try { controller.enqueue(enc.encode(`data: ${JSON.stringify(data)}\n\n`)) } catch { /* closed */ }
+      }
+      const close = () => { try { controller.close() } catch { /* already closed */ } }
 
-      const proc = spawn('claude', ['-p', prompt], {
+      // 프롬프트를 stdin으로 전달 (긴 프롬프트의 ARG_MAX 한계 회피)
+      const proc = spawn('claude', ['--print'], {
         env: process.env,
-        stdio: ['ignore', 'pipe', 'pipe'],
+        stdio: ['pipe', 'pipe', 'pipe'],
       })
+      proc.stdin?.write(prompt)
+      proc.stdin?.end()
 
       proc.stdout.on('data', (chunk: Buffer) => {
         const text = chunk.toString()
@@ -215,21 +223,19 @@ ${originalContent}
 
       proc.stderr.on('data', (chunk: Buffer) => {
         const msg = chunk.toString().trim()
-        if (msg) send({ type: 'error', text: msg })
+        if (msg) send({ type: 'text', text: `▸ ${msg}\n` })
       })
 
       proc.on('close', () => {
-        // .harness/templates/ 에 저장
         if (!fs.existsSync(TUNED_DIR)) fs.mkdirSync(TUNED_DIR, { recursive: true })
         fs.writeFileSync(tunedPath, fullContent, 'utf-8')
-
         send({ type: 'done' })
-        controller.close()
+        close()
       })
 
       proc.on('error', (err: Error) => {
-        send({ type: 'error', text: err.message })
-        controller.close()
+        send({ type: 'text', text: `▸ 오류: ${err.message}\n` })
+        close()
       })
     },
   })
@@ -245,6 +251,8 @@ export async function PUT(req: NextRequest) {
   const tmpl = TEMPLATES.find(t => t.id === id)
   if (!tmpl || !content) return NextResponse.json({ error: '잘못된 요청' }, { status: 400 })
 
+  // 요청마다 현재 프로젝트 경로 동적 조회
+  const TUNED_DIR = path.join(getHarnessDir(), 'templates')
   if (!fs.existsSync(TUNED_DIR)) fs.mkdirSync(TUNED_DIR, { recursive: true })
   const tunedPath = path.join(TUNED_DIR, path.basename(tmpl.file))
   fs.writeFileSync(tunedPath, content, 'utf-8')

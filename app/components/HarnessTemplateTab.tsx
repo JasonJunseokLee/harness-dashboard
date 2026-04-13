@@ -145,38 +145,26 @@ export default function HarnessTemplateTab() {
     setTuning(false);
   }
 
-  // ── 일괄 튜닝 핵심 로직 (초기 시작 + 재개 공용) ──────────────
+  // ── 일괄 튜닝 핵심 로직 (병렬 실행) ─────────────────────────
   async function runBatchTuning(items: TemplateMeta[], instruction: string) {
     if (!items.length) return;
     setBatchTuning(true);
+    setBatchProgress({ current: 0, total: items.length, label: "병렬 튜닝 중..." });
 
-    // 남은 항목 ID를 localStorage에 저장 (페이지 이동 후 재개용)
-    const savePending = (pendingIds: string[]) => {
-      try {
-        if (pendingIds.length === 0) {
-          localStorage.removeItem(BATCH_KEY);
-        } else {
-          localStorage.setItem(BATCH_KEY, JSON.stringify({ inProgress: true, pendingIds, instruction }));
-        }
-      } catch { /* 무시 */ }
-    };
+    // 완료 카운터 (병렬 실행이라 progress는 완료 수로 표시)
+    let doneCount = 0;
 
-    const total = items.length;
-    savePending(items.map((t) => t.id));
-
-    for (let i = 0; i < items.length; i++) {
-      const item = items[i];
-      setBatchProgress({ current: i + 1, total, label: item.label });
-
+    // 각 항목을 개별 비동기 함수로 처리
+    const tuneOne = async (item: TemplateMeta) => {
       try {
         const res = await fetch("/api/setup/harness-templates", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ id: item.id, instruction }),
         });
-        if (!res.ok || !res.body) continue;
+        if (!res.ok || !res.body) return;
 
-        // SSE 스트림을 끝까지 소비 (완료 신호 대기)
+        // SSE 스트림 끝까지 소비 (완료 신호 대기)
         const reader = res.body.getReader();
         const dec = new TextDecoder();
         while (true) {
@@ -189,20 +177,23 @@ export default function HarnessTemplateTab() {
             try {
               const event = JSON.parse(raw);
               if (event.type === "done") {
+                // 목록 tuned 상태 갱신
                 setList((prev) => prev.map((t) => t.id === item.id ? { ...t, tuned: true } : t));
+                doneCount += 1;
+                setBatchProgress({ current: doneCount, total: items.length, label: item.label });
               }
             } catch { /* JSON 파싱 실패 무시 */ }
           }
         }
       } catch { /* 개별 실패 건너뜀 */ }
+    };
 
-      // 완료된 항목을 pending에서 제거
-      savePending(items.slice(i + 1).map((t) => t.id));
-    }
+    // 모든 항목을 동시에 병렬 실행
+    await Promise.all(items.map(tuneOne));
 
     setBatchTuning(false);
     setBatchProgress(null);
-    localStorage.removeItem(BATCH_KEY);
+    try { localStorage.removeItem(BATCH_KEY); } catch { /* 무시 */ }
   }
 
   // ── 일괄 튜닝 시작 (UI 버튼 → 전체 doc 목록으로 실행) ─────────

@@ -23,16 +23,20 @@ export async function POST() {
     return NextResponse.json({ error: '컨텍스트 파일이 없습니다' }, { status: 400 })
   }
 
-  const files = fs.readdirSync(CONTEXT_DIR).filter((f) => !f.startsWith('.'))
+  // 텍스트 파일만 허용 (PDF·바이너리 제외)
+  const TEXT_EXTS = ['.txt', '.md', '.json', '.csv']
+  const files = fs.readdirSync(CONTEXT_DIR)
+    .filter((f) => !f.startsWith('.') && TEXT_EXTS.includes(path.extname(f).toLowerCase()))
   if (files.length === 0) {
-    return NextResponse.json({ error: '컨텍스트 파일이 없습니다' }, { status: 400 })
+    return NextResponse.json({ error: '분석 가능한 텍스트 파일이 없습니다 (.txt .md .json .csv만 지원)' }, { status: 400 })
   }
 
-  // 모든 컨텍스트 파일 읽기
+  // 모든 컨텍스트 파일 읽기 (null byte 제거)
   const contextContent = files
     .map((f) => {
       try {
-        const content = fs.readFileSync(path.join(CONTEXT_DIR, f), 'utf-8')
+        const raw = fs.readFileSync(path.join(CONTEXT_DIR, f), 'utf-8')
+        const content = raw.replace(/\0/g, '')
         return `=== ${f} ===\n${content}`
       } catch {
         return `=== ${f} === (읽기 실패)`
@@ -81,7 +85,7 @@ ${contextContent}
       })
       proc.stderr.on('data', (chunk: Buffer) => {
         const msg = chunk.toString().trim()
-        if (msg) send({ type: 'error', text: msg })
+        if (msg) send({ type: 'text', text: `▸ ${msg}\n` })
       })
       proc.on('close', (code: number) => {
         try {
