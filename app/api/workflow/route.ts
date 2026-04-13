@@ -6,68 +6,103 @@ import { getHarnessDir } from '@/app/lib/project-path'
 
 export const runtime = 'nodejs'
 
+type FlowData = {
+  id: string
+  title: string
+  description: string
+  nodes: unknown[]
+  edges: unknown[]
+}
+
+type WorkflowFile = { flows: FlowData[] }
+
+// 파일 읽기 + 구버전(단일 흐름) 자동 마이그레이션
+function readWorkflowFile(filePath: string): WorkflowFile | null {
+  if (!fs.existsSync(filePath)) return null
+  try {
+    const raw = JSON.parse(fs.readFileSync(filePath, 'utf-8'))
+    if (raw.nodes && Array.isArray(raw.nodes) && !raw.flows) {
+      // 구버전 단일 흐름 → 신규 멀티 흐름
+      return { flows: [{ id: 'flow_legacy', ...raw }] }
+    }
+    return raw as WorkflowFile
+  } catch { return null }
+}
+
+function writeWorkflowFile(filePath: string, data: WorkflowFile) {
+  fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf-8')
+}
+
 function loadAnalysisSection(): string {
   const HARNESS = getHarnessDir()
   const ANALYSIS_FILE = path.join(HARNESS, 'context-analysis.json')
   if (!fs.existsSync(ANALYSIS_FILE)) return ''
   try {
     const a = JSON.parse(fs.readFileSync(ANALYSIS_FILE, 'utf-8'))
-    return `[컨텍스트 분석 리포트 — 아래 인사이트를 워크플로우에 반영하세요]
-사용자 문제: ${(a.userPainPoints ?? []).join(' / ')}
-핵심 데이터: ${(a.keyData ?? []).join(' / ')}
-도출 요구사항: ${(a.requirements ?? []).join(' / ')}`
+    return `[컨텍스트 분석]\n사용자 문제: ${(a.userPainPoints ?? []).join(' / ')}\n도출 요구사항: ${(a.requirements ?? []).join(' / ')}`
   } catch { return '' }
 }
 
-export async function GET(req: NextRequest) {
+// ─── GET: 전체 흐름 목록 반환 ──────────────────────────────────
+export async function GET() {
   const HARNESS = getHarnessDir()
   const WORKFLOW_FILE = path.join(HARNESS, 'workflow.json')
-  const WORKFLOW_PREV_FILE = path.join(HARNESS, 'workflow.prev.json')
-  const isPrev = req.nextUrl.searchParams.get('prev') === 'true'
-  const file = isPrev ? WORKFLOW_PREV_FILE : WORKFLOW_FILE
-  if (!fs.existsSync(file)) return NextResponse.json({ exists: false })
-  const data = JSON.parse(fs.readFileSync(file, 'utf-8'))
-  return NextResponse.json({ exists: true, data })
+  const data = readWorkflowFile(WORKFLOW_FILE)
+  if (!data) return NextResponse.json({ exists: false, flows: [] })
+  return NextResponse.json({ exists: true, flows: data.flows })
 }
 
-// PUT: 편집된 워크플로우 저장
+// ─── DELETE: 특정 흐름 삭제 ────────────────────────────────────
+export async function DELETE(req: NextRequest) {
+  const HARNESS = getHarnessDir()
+  const WORKFLOW_FILE = path.join(HARNESS, 'workflow.json')
+  const flowId = req.nextUrl.searchParams.get('flowId')
+  if (!flowId) return NextResponse.json({ error: 'flowId 필요' }, { status: 400 })
+  const data = readWorkflowFile(WORKFLOW_FILE) ?? { flows: [] }
+  data.flows = data.flows.filter(f => f.id !== flowId)
+  if (!fs.existsSync(HARNESS)) fs.mkdirSync(HARNESS, { recursive: true })
+  writeWorkflowFile(WORKFLOW_FILE, data)
+  return NextResponse.json({ success: true })
+}
+
+// ─── PUT: 특정 흐름 업데이트 ───────────────────────────────────
 export async function PUT(req: NextRequest) {
   const HARNESS = getHarnessDir()
   const WORKFLOW_FILE = path.join(HARNESS, 'workflow.json')
   const body = await req.json()
+  const { flowId, data: flowData } = body
+  if (!flowId || !flowData) return NextResponse.json({ error: '잘못된 요청' }, { status: 400 })
   if (!fs.existsSync(HARNESS)) fs.mkdirSync(HARNESS, { recursive: true })
-  fs.writeFileSync(WORKFLOW_FILE, JSON.stringify(body, null, 2), 'utf-8')
+  const file = readWorkflowFile(WORKFLOW_FILE) ?? { flows: [] }
+  const idx = file.flows.findIndex(f => f.id === flowId)
+  if (idx >= 0) { file.flows[idx] = { ...flowData, id: flowId } }
+  else { file.flows.push({ ...flowData, id: flowId }) }
+  writeWorkflowFile(WORKFLOW_FILE, file)
   return NextResponse.json({ success: true })
 }
 
+// ─── POST: 특정 흐름 생성 (SSE) ────────────────────────────────
 export async function POST(req: NextRequest) {
   const HARNESS = getHarnessDir()
   const PRD_FILE = path.join(HARNESS, 'prd.json')
   const FEATURES_FILE = path.join(HARNESS, 'features.json')
   const WORKFLOW_FILE = path.join(HARNESS, 'workflow.json')
-  const WORKFLOW_PREV_FILE = path.join(HARNESS, 'workflow.prev.json')
 
   const body = await req.json().catch(() => ({}))
+  const flowId: string = body.flowId ?? `flow_${Date.now().toString(36)}`
+  const flowTitle: string = body.title ?? '유저 워크플로우'
+  const flowDesc: string = body.description ?? ''
   const instruction: string = body.instruction ?? ''
 
   if (!fs.existsSync(PRD_FILE)) {
     return new Response(JSON.stringify({ error: 'PRD를 먼저 생성해주세요' }), { status: 400 })
   }
 
-  // 기존 워크플로우 백업
-  if (fs.existsSync(WORKFLOW_FILE)) {
-    fs.copyFileSync(WORKFLOW_FILE, WORKFLOW_PREV_FILE)
-  }
-
   const prd = JSON.parse(fs.readFileSync(PRD_FILE, 'utf-8'))
-  const features = fs.existsSync(FEATURES_FILE)
-    ? JSON.parse(fs.readFileSync(FEATURES_FILE, 'utf-8'))
-    : null
+  const features = fs.existsSync(FEATURES_FILE) ? JSON.parse(fs.readFileSync(FEATURES_FILE, 'utf-8')) : null
 
-  // treeNodes 포맷 (신규) 또는 categories 포맷 (구버전) 모두 처리
   let featureList = ''
   if (features?.treeNodes) {
-    // 신규: treeNodes 플랫 배열에서 feature/subfeature 추출
     const cats = features.treeNodes.filter((n: { type: string }) => n.type === 'category')
     const feats = features.treeNodes.filter((n: { type: string }) => n.type === 'feature')
     featureList = feats
@@ -75,25 +110,18 @@ export async function POST(req: NextRequest) {
         const cat = cats.find((c: { id: string; label: string }) => c.id === f.parentId)
         return cat ? `${cat.label} > ${f.label}` : f.label
       })
-      .slice(0, 12)
-      .join('\n')
-  } else if (features?.categories) {
-    // 구버전 호환
-    featureList = features.categories
-      .flatMap((c: { name: string; features: { name: string }[] }) =>
-        c.features.map((f: { name: string }) => `${c.name} > ${f.name}`)
-      )
-      .slice(0, 12)
       .join('\n')
   }
 
   const analysisSection = loadAnalysisSection()
-
   const instructionSection = instruction.trim()
     ? `\n[사용자 추가 지시사항 — 최우선으로 반영하세요]\n${instruction.trim()}\n`
     : ''
 
-  const prompt = `당신은 UX 디자이너입니다. 아래 정보를 바탕으로 핵심 유저 워크플로우를 작성하세요.${instructionSection}
+  const prompt = `[중요] 파일 읽기, 파일 쓰기, 터미널 실행 등 어떤 도구도 사용하지 마세요. 오직 JSON만 stdout으로 출력하세요.
+[중요] 백틱, 마크다운 코드블록, 설명 텍스트 모두 금지. 순수 JSON 하나만 출력하세요.
+
+당신은 UX 디자이너입니다. 아래 정보를 바탕으로 지정된 유저 워크플로우를 작성하세요.${instructionSection}
 
 [서비스]
 ${prd.overview?.oneLiner ?? ''}
@@ -106,7 +134,11 @@ ${prd.target?.scenario ?? ''}
 
 ${featureList ? `[주요 기능]\n${featureList}\n` : ''}${analysisSection ? `\n${analysisSection}\n` : ''}
 
-핵심 워크플로우 1개를 아래 JSON 형식으로만 반환하세요. 마크다운 없이 순수 JSON만 출력하세요.
+[생성할 워크플로우]
+제목: ${flowTitle}
+시나리오: ${flowDesc}
+
+이 워크플로우만을 위한 플로우차트를 아래 JSON 형식으로만 반환하세요.
 
 노드 타입:
 - "start": 시작점 (1개)
@@ -115,54 +147,39 @@ ${featureList ? `[주요 기능]\n${featureList}\n` : ''}${analysisSection ? `\n
 - "decision": 분기 판단 — 조건을 질문 형태로
 - "system": 시스템 자동 처리
 
-각 노드에 label(10자 이내)과 description(사용자/시스템이 실제로 하는 행동을 구체적으로, 40자 이내) 포함.
-decision 노드 이후 엣지에만 label: "예" / "아니오" 표기.
+각 노드: label(10자 이내), description(40자 이내) 필수.
+decision 노드 이후 엣지에만 label: "예" / "아니오".
 
 {
-  "title": "워크플로우 제목",
-  "description": "핵심 시나리오 한 문장",
+  "title": "${flowTitle}",
+  "description": "${flowDesc}",
   "nodes": [
-    {
-      "id": "n1",
-      "type": "start",
-      "label": "시작",
-      "description": "담당자가 ERP에 로그인한다"
-    },
-    {
-      "id": "n2",
-      "type": "action",
-      "label": "재고 확인",
-      "description": "오늘 출하할 품목의 재고 수량을 확인한다"
-    },
-    {
-      "id": "n3",
-      "type": "decision",
-      "label": "재고 충분?",
-      "description": "출하 요청량 대비 현재 재고가 충분한지 판단"
-    }
+    { "id": "n1", "type": "start", "label": "시작", "description": "..." }
   ],
   "edges": [
-    { "id": "e1", "source": "n1", "target": "n2" },
-    { "id": "e2", "source": "n2", "target": "n3" },
-    { "id": "e3", "source": "n3", "target": "n4", "label": "예" },
-    { "id": "e4", "source": "n3", "target": "n7", "label": "아니오" }
+    { "id": "e1", "source": "n1", "target": "n2" }
   ]
 }
 
-노드 10~16개, 엣지 9~18개. 실제 시나리오에 맞게 자연스럽게 구성하세요.`
+노드 10~16개, 엣지 9~18개.`
+
+  const enc = new TextEncoder()
+  let accumulated = ''
 
   const stream = new ReadableStream({
     start(controller) {
-      const enc = new TextEncoder()
-      const send = (data: object) =>
-        controller.enqueue(enc.encode(`data: ${JSON.stringify(data)}\n\n`))
+      const send = (data: object) => {
+        try { controller.enqueue(enc.encode(`data: ${JSON.stringify(data)}\n\n`)) } catch { /* closed */ }
+      }
+      const close = () => { try { controller.close() } catch { /* already closed */ } }
 
-      const proc = spawn('claude', ['-p', prompt], {
+      const proc = spawn('claude', ['--print'], {
         env: process.env,
-        stdio: ['ignore', 'pipe', 'pipe'],
+        stdio: ['pipe', 'pipe', 'pipe'],
       })
+      proc.stdin?.write(prompt)
+      proc.stdin?.end()
 
-      let accumulated = ''
       proc.stdout.on('data', (chunk: Buffer) => {
         const text = chunk.toString()
         accumulated += text
@@ -172,21 +189,25 @@ decision 노드 이후 엣지에만 label: "예" / "아니오" 표기.
         const msg = chunk.toString().trim()
         if (msg) send({ type: 'text', text: `▸ ${msg}\n` })
       })
-      proc.on('close', (code: number) => {
+      proc.on('close', () => {
         try {
           const cleaned = accumulated.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
           const parsed = JSON.parse(cleaned)
           if (!fs.existsSync(HARNESS)) fs.mkdirSync(HARNESS, { recursive: true })
-          fs.writeFileSync(WORKFLOW_FILE, JSON.stringify(parsed, null, 2), 'utf-8')
-          send({ type: 'done', code, workflow: parsed })
+          const file = readWorkflowFile(WORKFLOW_FILE) ?? { flows: [] }
+          const flowWithId = { ...parsed, id: flowId }
+          const idx = file.flows.findIndex(f => f.id === flowId)
+          if (idx >= 0) { file.flows[idx] = flowWithId } else { file.flows.push(flowWithId) }
+          writeWorkflowFile(WORKFLOW_FILE, file)
+          send({ type: 'done', flowId, flow: flowWithId })
         } catch {
-          send({ type: 'done', code, error: 'JSON 파싱 실패' })
+          send({ type: 'done', error: 'JSON 파싱 실패' })
         }
-        controller.close()
+        close()
       })
       proc.on('error', (err: Error) => {
-        send({ type: 'error', text: err.message })
-        controller.close()
+        send({ type: 'text', text: `▸ 오류: ${err.message}\n` })
+        close()
       })
     },
   })
