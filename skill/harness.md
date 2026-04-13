@@ -70,36 +70,31 @@ Bash("open http://localhost:3748")
 
 ---
 
-### Step 4 — 미실행: 시작 안내 + 로컬 현황 요약
+### Step 4 — 미실행: 자동으로 백그라운드 시작 후 브라우저 열기
 
-아래 메시지를 출력한다:
+"🚀 하네스 대시보드를 시작합니다..." 를 출력한다.
 
+아래 명령으로 대시보드를 백그라운드에서 시작한다 (run_in_background: true):
 ```
-⚠️ 하네스 대시보드가 실행 중이지 않습니다.
-
-시작하려면 새 터미널에서:
-  cd __DASHBOARD_PATH__ && npm run dev
-
-또는 Claude Code 터미널에서 (! 접두사로 실행):
-  ! cd __DASHBOARD_PATH__ && npm run dev
-
-시작 후 다시 /harness 를 입력하면 연결됩니다.
+Bash("cd __DASHBOARD_PATH__ && npm run dev > /tmp/harness-dev.log 2>&1 &", run_in_background=true)
 ```
 
-그리고 현재 프로젝트의 `.harness/` 디렉토리를 파일 존재 여부로 현황을 확인한다:
+그 다음, 대시보드가 응답할 때까지 최대 30초간 기다린다:
+```
+Bash("for i in $(seq 1 30); do curl -s http://localhost:3748/api/status >/dev/null 2>&1 && echo ready && break || sleep 1; done")
+```
 
+"ready" 가 반환되면 → `/api/status` 를 다시 호출해 Step 3 과 동일하게 상태를 표시한다.
+
+그리고 브라우저를 자동으로 연다:
 ```
-Bash("ls <pwd>/.harness/ 2>/dev/null || echo '(없음)'")
+Bash("open http://localhost:3748")
 ```
 
-결과를 바탕으로:
+30초 내에 "ready" 가 오지 않으면 아래를 출력한다:
 ```
-📁 <프로젝트명> 로컬 현황
-   .harness/ 폴더: <존재 여부>
-   project.json  : <있으면 ✅ 없으면 ⬜>
-   prd.json      : <있으면 ✅ 없으면 ⬜>
-   features.json : <있으면 ✅ 없으면 ⬜>
-   sprint-plan.md: <있으면 ✅ 없으면 ⬜>
+⚠️ 시작 시간이 초과되었습니다. /tmp/harness-dev.log 를 확인하세요.
+Bash("tail -20 /tmp/harness-dev.log")
 ```
 
 ---
