@@ -6,23 +6,36 @@ import { getContextDir, getHarnessDir } from '@/app/lib/project-path'
 
 export const runtime = 'nodejs'
 
-// context 폴더 파일 읽기
+// context 폴더 파일 읽기 (텍스트 파일만, PDF·바이너리 제외)
 function loadContext(): string {
   const CONTEXT_DIR = getContextDir()
   if (!fs.existsSync(CONTEXT_DIR)) return ''
-  const files = fs.readdirSync(CONTEXT_DIR).filter(f => !f.startsWith('.'))
+  const TEXT_EXTS = ['.txt', '.md', '.json', '.csv']
+  const files = fs.readdirSync(CONTEXT_DIR)
+    .filter(f => !f.startsWith('.') && TEXT_EXTS.includes(path.extname(f).toLowerCase()))
   if (!files.length) return ''
   return files.map(f => {
-    const content = fs.readFileSync(path.join(CONTEXT_DIR, f), 'utf-8')
-    return `=== ${f} ===\n${content}`
-  }).join('\n\n')
+    try {
+      const content = fs.readFileSync(path.join(CONTEXT_DIR, f), 'utf-8')
+      return `=== ${f} ===\n${content}`
+    } catch {
+      return ''
+    }
+  }).filter(Boolean).join('\n\n')
 }
 
 // claude -p 를 SSE로 스트리밍 실행
 function runClaudeSSE(prompt: string, controller: ReadableStreamDefaultController) {
   const enc = new TextEncoder()
-  const send = (data: object) =>
-    controller.enqueue(enc.encode(`data: ${JSON.stringify(data)}\n\n`))
+  // 클라이언트 연결이 끊겨 controller가 닫혀 있을 수 있어 try-catch 처리
+  const send = (data: object) => {
+    try {
+      controller.enqueue(enc.encode(`data: ${JSON.stringify(data)}\n\n`))
+    } catch { /* controller already closed */ }
+  }
+  const close = () => {
+    try { controller.close() } catch { /* already closed */ }
+  }
 
   const proc = spawn('claude', ['-p', prompt], {
     env: process.env,
@@ -36,11 +49,11 @@ function runClaudeSSE(prompt: string, controller: ReadableStreamDefaultControlle
   })
   proc.on('close', (code: number) => {
     send({ type: 'done', code })
-    controller.close()
+    close()
   })
   proc.on('error', (err: Error) => {
     send({ type: 'error', text: err.message })
-    controller.close()
+    close()
   })
 }
 

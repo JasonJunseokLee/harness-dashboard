@@ -38,12 +38,12 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: '파일이 없습니다' }, { status: 400 })
   }
 
-  // 텍스트 파일만 허용
-  const allowed = ['.txt', '.md', '.pdf', '.json', '.csv']
+  // 텍스트 파일만 허용 (PDF는 바이너리라 분석 불가)
+  const allowed = ['.txt', '.md', '.json', '.csv']
   const ext = path.extname(file.name).toLowerCase()
   if (!allowed.includes(ext)) {
     return NextResponse.json(
-      { error: `허용된 확장자: ${allowed.join(', ')}` },
+      { error: `텍스트 파일만 업로드 가능합니다 (${allowed.join(', ')}). PDF는 텍스트로 변환 후 .txt로 저장해주세요.` },
       { status: 400 }
     )
   }

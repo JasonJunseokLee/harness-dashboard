@@ -95,6 +95,7 @@ export default function OnboardingPage() {
   const [answers, setAnswers] = useState<Record<string, string | string[]>>({});
   const [customInputs, setCustomInputs] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
+  const [qError, setQError] = useState("");
 
   // context 파일 목록 로드
   useEffect(() => {
@@ -188,12 +189,28 @@ export default function OnboardingPage() {
     setQDone(false);
     setQuestions([]);
     setRawBuffer("");
+    setQError("");
 
-    const res = await fetch("/api/onboarding", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ action: "generate_questions", description }),
-    });
+    let res: Response;
+    try {
+      res = await fetch("/api/onboarding", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "generate_questions", description }),
+      });
+    } catch {
+      setQError("서버 연결 실패. 대시보드가 실행 중인지 확인하세요.");
+      setGeneratingQ(false);
+      return;
+    }
+
+    // API 에러 응답 처리 (SSE 아닌 JSON 에러)
+    if (!res.ok) {
+      const errText = await res.text().catch(() => "알 수 없는 오류");
+      setQError(`질문 생성 실패 (${res.status}): ${errText}`);
+      setGeneratingQ(false);
+      return;
+    }
 
     const reader = res.body?.getReader();
     const dec = new TextDecoder();
@@ -206,20 +223,28 @@ export default function OnboardingPage() {
         if (!line.startsWith("data: ")) continue;
         const json = line.slice(6).trim();
         if (!json) continue;
-        const event = JSON.parse(json);
-        if (event.type === "text") {
-          accumulated += event.text;
-          setRawBuffer(accumulated);
-        }
-        if (event.type === "done") {
-          try {
-            const cleaned = accumulated.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
-            const parsed = JSON.parse(cleaned);
-            setQuestions(parsed.questions ?? []);
-            setQDone(true);
-          } catch {
-            console.error("질문 파싱 실패:", accumulated);
+        try {
+          const event = JSON.parse(json);
+          if (event.type === "text") {
+            accumulated += event.text;
+            setRawBuffer(accumulated);
           }
+          if (event.type === "error") {
+            setQError(event.text || "claude 실행 오류");
+          }
+          if (event.type === "done") {
+            try {
+              const cleaned = accumulated.replace(/```json\n?/g, "").replace(/```\n?/g, "").trim();
+              const parsed = JSON.parse(cleaned);
+              setQuestions(parsed.questions ?? []);
+              setQDone(true);
+            } catch {
+              setQError("질문 파싱 실패. 재시도해주세요.");
+              console.error("질문 파싱 실패:", accumulated);
+            }
+          }
+        } catch {
+          // JSON 파싱 실패한 SSE 라인 무시
         }
       }
     }
@@ -551,7 +576,18 @@ export default function OnboardingPage() {
               />
             </div>
 
-            {!generatingQ && questions.length === 0 && rawBuffer && (
+            {/* 에러 표시 (API 오류 또는 파싱 실패) */}
+            {!generatingQ && qError && (
+              <div className="bg-red-950 border border-red-800 rounded-xl p-4 text-red-300 text-sm">
+                {qError}
+                <button onClick={generateQuestions}
+                  className="ml-3 px-3 py-1 bg-red-900 hover:bg-red-800 rounded-lg text-xs">
+                  재시도
+                </button>
+              </div>
+            )}
+            {/* 레거시: rawBuffer는 있는데 파싱만 실패한 경우 */}
+            {!generatingQ && !qError && questions.length === 0 && rawBuffer && (
               <div className="bg-red-950 border border-red-800 rounded-xl p-4 text-red-300 text-sm">
                 파싱 실패.
                 <button onClick={generateQuestions}
