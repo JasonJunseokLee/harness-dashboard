@@ -1,4 +1,6 @@
-import { useCallback, useState } from 'react';
+'use client';
+
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 // ─── 타입 정의 ──────────────────────────────────────────────
 export interface UseAIRefinementOptions<T> {
@@ -52,7 +54,8 @@ async function streamFromApi(
         const event = JSON.parse(json);
         if (event.type === 'text') onText(event.text);
         if (event.type === 'done') onDone(event);
-        if (event.type === 'error') console.error('SSE error:', event.text);
+        // error 이벤트도 onDone으로 전달하여 UI에서 로딩 상태 해제
+        if (event.type === 'error') onDone({ ...event, type: 'done' });
       } catch {
         // JSON 파싱 실패 무시
       }
@@ -79,6 +82,11 @@ export function useAIRefinement<T>(
   const [currentVersion, setCurrentVersion] = useState('v1');
   const [versionRefresh, setVersionRefresh] = useState(0);
   const [error, setError] = useState<string | null>(null);
+
+  // 최신 콘텐츠를 ref로 관리하여 handleRefine의 불필요한 재생성 방지
+  const contentRef = useRef(currentContent);
+  const updateRef = (value: any) => { contentRef.current = value; };
+  useEffect(() => updateRef(currentContent), [currentContent]);
 
   // ──── SSE 스트리밍으로 AI 수정 요청 ────────────────────
   const handleRefine = useCallback(
@@ -125,10 +133,11 @@ export function useAIRefinement<T>(
           setRefineProgress('');
         },
         instruction,
-        { context: serializer(currentContent), format },
+        { context: serializer(contentRef.current), format },
       );
     },
-    [phase, format, currentContent, serializer, onContentChange, parser]
+    [phase, format, serializer, onContentChange, parser]
+    // currentContent는 ref로 관리하므로 dependency 제외
   );
 
   // ──── 버전 복원 ────────────────────────────────────────
@@ -146,6 +155,7 @@ export function useAIRefinement<T>(
 
         // 복원된 내용 로드
         const vRes = await fetch(`/api/ai-results/${phase}/versions/${data.newVersion}`);
+        if (!vRes.ok) throw new Error(`버전 조회 실패: ${vRes.status}`);
         const vData = await vRes.json();
 
         // 상태에 반영

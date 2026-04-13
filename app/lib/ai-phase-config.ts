@@ -12,6 +12,8 @@
 //   새 phase를 추가하려면 이 파일만 수정하면 라우트 전체가 자동 지원.
 // ─────────────────────────────────────────────────────────────
 
+import * as path from 'path'
+
 // 지원하는 phase 식별자 (design.md Phase A 범위)
 // onboarding-* 은 후속 작업에서 활성화 예정이지만 런타임 가드는 미리 허용
 export const SUPPORTED_PHASES = [
@@ -39,10 +41,10 @@ export const PHASE_FORMAT: Record<Phase, PhaseFormat> = {
   'onboarding-questions': 'json',
 }
 
-// phase → .harness/ai-results/{phase} 디렉토리 경로
-// AIVersionManager 생성자에 넘기는 phaseDir 로 그대로 사용
+// phase → .harness/ai-results/{phase} 디렉토리 경로 (절대 경로)
+// 배포 환경에서 cwd가 달라도 안전하도록 절대 경로 반환
 export function getPhaseDir(phase: Phase): string {
-  return `.harness/ai-results/${phase}`
+  return path.join(process.cwd(), '.harness', 'ai-results', phase)
 }
 
 // 허용되지 않은 phase 값인지 검사 (런타임 가드)
@@ -116,8 +118,10 @@ export const PROMPT_TEMPLATES: Record<Phase, PromptBuilder> = {
 }
 
 // ─── JSON 정제 & 검증 헬퍼 ────────────────────────────────────
-// claude 가 가끔 ```json ... ``` 으로 감싸서 출력하는 경우가 있어
-// 앞뒤 백틱 블록을 벗겨낸 뒤 JSON.parse 를 시도한다.
+// Claude가 설명 텍스트와 함께 JSON을 반환하는 경우가 있어
+// 1. 응답이 ```json ... ``` 코드블록이면 추출
+// 2. 응답 중간에 JSON이 있으면 추출
+// 3. 그 외 응답 전체를 JSON으로 파싱 시도
 //
 // 성공: { ok: true, cleaned: string }  (정제된 JSON 문자열)
 // 실패: { ok: false, error: string }   (파싱 실패 사유)
@@ -127,12 +131,14 @@ export function sanitizeAndValidateJson(
 ): { ok: true; cleaned: string } | { ok: false; error: string } {
   let text = raw.trim()
 
-  // ```json ... ``` 또는 ``` ... ``` 형태면 벗겨낸다
-  if (text.startsWith('```')) {
-    text = text.replace(/^```[a-zA-Z0-9]*\s*\n?/, '')
-    text = text.replace(/\n?```\s*$/, '')
-    text = text.trim()
+  // 방법 1: 코드블록 내 JSON 추출 (```json ... ``` 또는 ``` ... ```)
+  const codeBlockMatch = text.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/m)
+  if (codeBlockMatch) {
+    text = codeBlockMatch[1].trim()
   }
+
+  // 방법 2: 코드블록이 없으면 응답 전체를 JSON으로 간주
+  // (이미 text가 코드블록에서 추출되었거나, 원래 JSON 문자열일 수 있음)
 
   try {
     // 파싱이 성공해야만 저장 허용

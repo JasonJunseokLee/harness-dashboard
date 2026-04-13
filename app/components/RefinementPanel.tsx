@@ -7,7 +7,8 @@ interface RefinementPanelProps {
   onRefine: (instruction: string) => Promise<void>;
   isRefining: boolean;
   progressText: string;
-  presets?: string[]; // 🆕 phase별 프리셋 (기본: claude-md 프리셋)
+  error?: string | null;  // 에러 메시지 (선택사항)
+  presets?: string[];     // phase별 프리셋 (기본: claude-md 프리셋)
 }
 
 // ─── 수정 지시사항 입력 패널 ────────────────────────────────────
@@ -15,6 +16,7 @@ export default function RefinementPanel({
   onRefine,
   isRefining,
   progressText,
+  error,
   presets: customPresets,
 }: RefinementPanelProps) {
   const [instruction, setInstruction] = useState("");
@@ -47,7 +49,7 @@ export default function RefinementPanel({
               type="button"
               onClick={() => setInstruction(preset)}
               disabled={isRefining}
-              className="text-[10px] px-2 py-1 bg-zinc-800 text-zinc-400 rounded hover:bg-zinc-700 hover:text-zinc-300 transition-colors disabled:opacity-50"
+              className="text-xs px-2 py-1 bg-zinc-800 text-zinc-400 rounded hover:bg-zinc-700 hover:text-zinc-300 transition-colors disabled:opacity-50"
             >
               {preset}
             </button>
@@ -74,12 +76,19 @@ export default function RefinementPanel({
         </button>
       </form>
 
+      {/* 에러 표시 */}
+      {error && (
+        <div className="mt-3 bg-red-950 border border-red-800 rounded-xl p-3 text-red-300 text-xs">
+          {error}
+        </div>
+      )}
+
       {/* 진행 상황 */}
       {isRefining && progressText && (
         <div className="mt-3 p-3 bg-zinc-800 rounded-lg border border-zinc-700">
           <div className="flex items-center gap-2 mb-2">
-            <div className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-pulse" />
-            <p className="text-[10px] text-zinc-500">스트리밍 중...</p>
+            <div className="w-1.5 h-1.5 bg-yellow-500 rounded-full animate-pulse" />
+            <p className="text-xs text-zinc-500">스트리밍 중...</p>
           </div>
           <div className="text-xs text-zinc-400 font-mono max-h-[150px] overflow-y-auto whitespace-pre-wrap leading-relaxed">
             {progressText.slice(-500)}

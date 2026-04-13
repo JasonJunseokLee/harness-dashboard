@@ -71,6 +71,13 @@ export async function POST(
         stdio: ['ignore', 'pipe', 'pipe'],
       })
 
+      // 30초 타임아웃: Claude 응답이 없으면 프로세스 강제 종료
+      const timeout = setTimeout(() => {
+        proc.kill('SIGTERM')
+        send({ type: 'error', text: '요청 시간 초과 (30초) — Claude 응답 없음' })
+        controller.close()
+      }, 30000)
+
       // 실시간 스트리밍: 모든 청크를 누적 + 클라이언트로 전달
       proc.stdout.on('data', (chunk: Buffer) => {
         const text = chunk.toString()
@@ -86,6 +93,9 @@ export async function POST(
 
       // 프로세스 종료 시 후처리 (버전 저장 + 완료 이벤트)
       proc.on('close', async () => {
+        // 타임아웃 정리
+        clearTimeout(timeout)
+
         try {
           const manager = new AIVersionManager(getPhaseDir(phase))
 
@@ -146,7 +156,9 @@ export async function POST(
 
       // 프로세스 자체 실행 실패 (예: claude 바이너리 없음)
       proc.on('error', (err: Error) => {
+        clearTimeout(timeout)
         send({ type: 'error', text: err.message })
+        send({ type: 'done' })  // UI에서 isRefining을 해제하도록 done 전송
         controller.close()
       })
     },

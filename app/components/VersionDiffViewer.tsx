@@ -97,13 +97,15 @@ export default function VersionDiffViewer({ phase, v1, v2, onClose }: VersionDif
 
       {/* 에러 */}
       {error && (
-        <div className="py-4 text-center text-red-400 text-sm">{error}</div>
+        <div className="bg-red-950 border border-red-800 rounded-xl p-3 text-red-300 text-xs">
+          {error}
+        </div>
       )}
 
       {/* diff 통계 */}
       {diff && (
         <>
-          <div className="flex gap-4 mb-3 text-[10px]">
+          <div className="flex gap-4 mb-3 text-xs">
             <span className="text-green-400">+{diff.stats.added} 추가</span>
             <span className="text-red-400">-{diff.stats.removed} 삭제</span>
             <span className="text-zinc-600">{diff.stats.unchanged} 동일</span>

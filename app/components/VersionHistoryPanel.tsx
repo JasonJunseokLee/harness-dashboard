@@ -32,6 +32,7 @@ export default function VersionHistoryPanel({
   const [versions, setVersions] = useState<VersionItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [restoringVersion, setRestoringVersion] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   // 버전 목록 로드
   useEffect(() => {
@@ -41,12 +42,15 @@ export default function VersionHistoryPanel({
   const fetchVersions = async () => {
     try {
       setIsLoading(true);
+      setError(null);
       // 🆕 phase를 URL에 동적으로 포함
       const res = await fetch(`/api/ai-results/${phase}/versions`);
       if (!res.ok) throw new Error("버전 목록 로드 실패");
       const data = await res.json();
       setVersions(data.versions ?? []);
     } catch (err) {
+      const msg = err instanceof Error ? err.message : "버전 목록 로드 실패";
+      setError(msg);
       console.error("버전 목록 로드 실패:", err);
     } finally {
       setIsLoading(false);
@@ -106,6 +110,17 @@ export default function VersionHistoryPanel({
     );
   }
 
+  if (error && !versions.length) {
+    return (
+      <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-4">
+        <h3 className="text-zinc-100 font-semibold mb-4 text-sm">버전 히스토리</h3>
+        <div className="bg-red-950 border border-red-800 rounded-xl p-3 text-red-300 text-xs">
+          {error}
+        </div>
+      </div>
+    );
+  }
+
   if (versions.length === 0) {
     return (
       <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-4">
@@ -143,11 +158,11 @@ export default function VersionHistoryPanel({
                   {v.v}
                 </span>
                 {currentVersion === v.v && (
-                  <span className="text-[10px] bg-blue-600/20 text-blue-400 px-1.5 py-0.5 rounded">
+                  <span className="text-xs bg-blue-600/20 text-blue-400 px-1.5 py-0.5 rounded">
                     현재
                   </span>
                 )}
-                <span className="text-[10px] bg-zinc-800 text-zinc-500 px-1.5 py-0.5 rounded">
+                <span className="text-xs bg-zinc-800 text-zinc-500 px-1.5 py-0.5 rounded">
                   {sourceLabel(v.source)}
                 </span>
               </div>
@@ -158,7 +173,7 @@ export default function VersionHistoryPanel({
                     handleRestore(v.v);
                   }}
                   disabled={restoringVersion === v.v}
-                  className="text-[10px] text-zinc-500 hover:text-blue-400 transition-colors disabled:opacity-50"
+                  className="px-2 py-1 text-xs text-zinc-500 hover:text-zinc-300 hover:bg-zinc-700 rounded transition-colors disabled:opacity-50"
                 >
                   {restoringVersion === v.v ? "복원 중..." : "복원"}
                 </button>
@@ -166,13 +181,13 @@ export default function VersionHistoryPanel({
             </div>
 
             {/* 메타 정보 */}
-            <p className="text-[10px] text-zinc-600 mt-1.5">
+            <p className="text-xs text-zinc-600 mt-1.5">
               {new Date(v.timestamp).toLocaleString("ko-KR")} · {v.lines}줄 · {formatSize(v.size)}
             </p>
 
             {/* 수정 지시사항 */}
             {v.instruction && (
-              <p className="text-[10px] text-zinc-500 mt-1.5 italic leading-relaxed truncate">
+              <p className="text-xs text-zinc-500 mt-1.5 italic leading-relaxed truncate">
                 &ldquo;{v.instruction}&rdquo;
               </p>
             )}
