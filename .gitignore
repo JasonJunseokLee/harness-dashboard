@@ -43,4 +43,4 @@ next-env.d.ts
 
 # harness — 프로젝트별 데이터 (커밋 제외)
 .harness/
-context/
+/context/
