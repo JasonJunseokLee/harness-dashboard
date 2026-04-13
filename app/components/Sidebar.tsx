@@ -11,7 +11,6 @@ type Status = {
   workflow: boolean;
   setup: boolean;
   sprintPlan: boolean;
-  ralphLoop: boolean;
 };
 
 const NAV = [
@@ -21,7 +20,6 @@ const NAV = [
   { href: "/workflow",     label: "유저 워크플로우", key: "workflow" as keyof Status,     num: "04" },
   { href: "/setup",        label: "하네스 세팅",    key: "setup" as keyof Status,        num: "05" },
   { href: "/sprint-plan",  label: "스프린트 플랜",  key: "sprintPlan" as keyof Status,   num: "06" },
-  { href: "/ralph-loop",  label: "Ralph Loop",    key: "ralphLoop" as keyof Status,    num: "07" },
 ];
 
 export default function Sidebar() {
@@ -33,7 +31,6 @@ export default function Sidebar() {
     workflow: false,
     setup: false,
     sprintPlan: false,
-    ralphLoop: false,
   });
 
   // 단계 완료 상태 로드
