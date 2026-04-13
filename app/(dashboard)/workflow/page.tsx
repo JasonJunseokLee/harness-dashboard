@@ -2,7 +2,6 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
-import InstructionInput from "@/app/components/InstructionInput";
 import ReactFlow, {
   Node,
   Edge,
@@ -22,6 +21,7 @@ import { applyDagreLayout } from "@/app/lib/dagre-layout";
 import TerminalStream from "@/app/components/TerminalStream";
 import SparklesIcon from "@/app/components/SparklesIcon";
 import { ToastStack, type ToastMsg } from "@/app/components/Toast";
+import { useAI } from "@/app/context/AIContext";
 
 // ─── 타입 ─────────────────────────────────────────────────────
 type WFNodeType = "start" | "end" | "action" | "decision" | "system";
@@ -257,6 +257,7 @@ function Legend() {
 // ─── 메인 페이지 ──────────────────────────────────────────────
 export default function WorkflowPage() {
   const router = useRouter();
+  const { setPhase, setPresets, setCurrentContent, registerContentUpdater, unregisterContentUpdater } = useAI();
   const [workflowData, setWorkflowData] = useState<WorkflowData | null>(null);
   const [generating, setGenerating] = useState(false);
   const [genDone, setGenDone] = useState(false);
@@ -269,11 +270,8 @@ export default function WorkflowPage() {
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
 
-  // 지시사항 + 이전 버전
-  const [instruction, setInstruction] = useState("");
-  const instructionRef = useRef("");
+  // 이전 버전
   const [prevWorkflow, setPrevWorkflow] = useState<WorkflowData | null>(null);
-  useEffect(() => { instructionRef.current = instruction; }, [instruction]);
 
   // 자동 저장 타이머
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -341,6 +339,8 @@ export default function WorkflowPage() {
 
   // ── 초기 로드 ───────────────────────────────────────────────
   useEffect(() => {
+    setPhase("workflow");
+    setPresets(["단계 간소화", "병렬 처리 추가", "에러 처리 강화", "승인 단계 추가"]);
     Promise.all([
       fetch("/api/workflow").then((r) => r.json()),
       fetch("/api/workflow?prev=true").then((r) => r.json()),
@@ -354,7 +354,14 @@ export default function WorkflowPage() {
       }
       if (prev.exists && prev.data?.nodes) setPrevWorkflow(prev.data);
     });
-  }, []);
+  }, [setPhase, setPresets, syncFlow]);
+
+  // 글로벌 AI Context에 Workflow 데이터 등록
+  useEffect(() => {
+    setCurrentContent(workflowData);
+    registerContentUpdater(setWorkflowData);
+    return () => unregisterContentUpdater();
+  }, [workflowData, setCurrentContent, registerContentUpdater, unregisterContentUpdater]);
 
   // 선택 변경 시 Flow 재동기화
   useEffect(() => {
@@ -378,7 +385,7 @@ export default function WorkflowPage() {
     const res = await fetch("/api/workflow", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ instruction: instructionRef.current }),
+      body: JSON.stringify({ instruction: "" }),
     });
     if (!res.ok) { setError("PRD를 먼저 생성해주세요."); setGenerating(false); return; }
 
@@ -632,16 +639,6 @@ export default function WorkflowPage() {
               </button>
             )}
           </div>
-        </div>
-
-        {/* 지시사항 입력창 */}
-        <div className="shrink-0 px-6 pt-3 pb-0">
-          <InstructionInput
-            value={instruction}
-            onChange={setInstruction}
-            disabled={generating}
-            placeholder="예: 결제 실패 분기를 추가해줘. 관리자 승인 단계를 넣어줘. 노드를 12개 이하로 줄여줘."
-          />
         </div>
 
         {/* 범례 */}

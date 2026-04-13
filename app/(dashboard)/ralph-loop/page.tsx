@@ -1,11 +1,8 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef } from "react";
 import TerminalStream from "@/app/components/TerminalStream";
-import RefinementPanel from "@/app/components/RefinementPanel";
-import VersionHistoryPanel from "@/app/components/VersionHistoryPanel";
-import VersionDiffViewer from "@/app/components/VersionDiffViewer";
-import { useAIRefinement } from "@/app/lib/useAIRefinement";
+import { useAI } from "@/app/context/AIContext";
 import type { RalphConfig } from "@/app/api/ralph-loop/route";
 
 // ─── 탭 타입 ─────────────────────────────────────────────────
@@ -120,43 +117,16 @@ export default function RalphLoopPage() {
   const [bulletin, setBulletin] = useState("");
   const [bulletinEvents, setBulletinEvents] = useState<BulletinEvent[]>([]);
   const [hasRun, setHasRun] = useState(false);
+  const [error, setError] = useState("");
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // AI 수정 기능 (diff 뷰어용)
-  const [showDiff, setShowDiff] = useState(false);
-  const [diffV1, setDiffV1] = useState("");
-  const [diffV2, setDiffV2] = useState("");
-
-  // useAIRefinement 훅 통합 (JSON 형식)
-  // config를 JSON 문자열로 직렬화하여 AI 수정 요청 시 전송
-  const {
-    handleRefine,
-    handleRestore,
-    handleSelectVersion,
-    isRefining,
-    refineProgress,
-    currentVersion,
-    versionRefresh,
-    error: refinementError,
-  } = useAIRefinement({
-    phase: "ralph-loop",
-    format: "json",
-    currentContent: config,
-    onContentChange: setConfig,
-    // config 객체를 JSON 문자열로 직렬화
-    serializer: (cfg: RalphConfig) => JSON.stringify(cfg, null, 2),
-    // JSON 문자열을 config 객체로 파싱
-    parser: (text: string) => {
-      try {
-        return JSON.parse(text) as RalphConfig;
-      } catch (err) {
-        throw new Error(`Ralph Loop 설정 파싱 실패: ${err instanceof Error ? err.message : '알 수 없는 오류'}`);
-      }
-    },
-  });
+  // ── 글로벌 AI Context ────────────────────────────────────────
+  const { setPhase, setPresets, setCurrentContent, registerContentUpdater, unregisterContentUpdater } = useAI();
 
   // ── 초기 로드 ──────────────────────────────────────────────
   useEffect(() => {
+    setPhase("ralph-loop");
+    setPresets(["루프 주기 조정", "평가 기준 강화", "출력 형식 변경", "컨텍스트 범위 확장"]);
     fetch("/api/ralph-loop")
       .then(r => r.json())
       .then(d => {
@@ -164,7 +134,14 @@ export default function RalphLoopPage() {
         setHasRun(d.hasRun ?? false);
       });
     loadBulletin();
-  }, []);
+  }, [setPhase, setPresets]);
+
+  // 글로벌 AI Context에 Ralph Loop 설정 등록
+  useEffect(() => {
+    setCurrentContent(config);
+    registerContentUpdater(setConfig);
+    return () => unregisterContentUpdater();
+  }, [config, setCurrentContent, registerContentUpdater, unregisterContentUpdater]);
 
   // ── bulletin 폴링 (3초) ─────────────────────────────────────
   useEffect(() => {
@@ -303,9 +280,9 @@ export default function RalphLoopPage() {
         </div>
 
         {/* 에러 메시지 */}
-        {(refinementError) && (
+        {error && (
           <div className="bg-red-950 border border-red-800 rounded-xl p-4 mb-6 text-red-300 text-sm">
-            {refinementError}
+            {error}
           </div>
         )}
 
@@ -331,9 +308,7 @@ export default function RalphLoopPage() {
 
         {/* ── 탭: 설계 ── */}
         {tab === "design" && (
-          <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-4">
-            {/* 왼쪽: 설계 폼 */}
-            <div className="space-y-5">
+          <div className="space-y-5">
 
             {/* 루프 목표 */}
             <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-5 space-y-3">
@@ -497,37 +472,6 @@ export default function RalphLoopPage() {
                     />
                   ))}
                 </div>
-              )}
-            </div>
-            </div>
-
-            {/* 오른쪽: AI 수정 + 버전 관리 패널 */}
-            <div className="space-y-4">
-              {/* AI 수정 요청 패널 */}
-              <RefinementPanel
-                onRefine={handleRefine}
-                isRefining={isRefining}
-                progressText={refineProgress}
-                presets={RALPH_LOOP_PRESETS}
-              />
-
-              {/* 버전 히스토리 패널 */}
-              <VersionHistoryPanel
-                phase="ralph-loop"
-                onSelectVersion={handleSelectVersion}
-                onRestore={handleRestore}
-                currentVersion={currentVersion}
-                refreshTrigger={versionRefresh}
-              />
-
-              {/* Diff 뷰어 */}
-              {showDiff && diffV1 && diffV2 && (
-                <VersionDiffViewer
-                  phase="ralph-loop"
-                  v1={diffV1}
-                  v2={diffV2}
-                  onClose={() => setShowDiff(false)}
-                />
               )}
             </div>
           </div>

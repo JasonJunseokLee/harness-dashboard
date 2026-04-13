@@ -51,16 +51,39 @@ export default function HarnessTemplateTab() {
   const [saving, setSaving] = useState(false);
   const [savedMsg, setSavedMsg] = useState("");
 
-  // ── 목록 로드 ──────────────────────────────────────────────
+  // ── 가이드 일괄 튜닝 ────────────────────────────────────────
+  const [batchTuning, setBatchTuning] = useState(false);
+  const [batchProgress, setBatchProgress] = useState<{ current: number; total: number; label: string } | null>(null);
+  const [batchInstruction, setBatchInstruction] = useState("");
+
+  // ── localStorage 키 ──────────────────────────────────────
+  const BATCH_KEY = "harness-batch-tuning";
+
+  // ── 목록 로드 + 일괄 튜닝 자동 재개 ─────────────────────────
   useEffect(() => {
     fetch("/api/setup/harness-templates")
       .then((r) => r.json())
       .then((d) => {
-        setList(d.list ?? []);
+        const loadedList: TemplateMeta[] = d.list ?? [];
+        setList(loadedList);
+
         // 첫 번째 항목 자동 선택
-        if (d.list?.length && !selectedId) {
-          selectTemplate(d.list[0].id);
+        if (loadedList.length && !selectedId) {
+          selectTemplate(loadedList[0].id);
         }
+
+        // 이전에 진행 중이던 일괄 튜닝 자동 재개
+        try {
+          const saved = JSON.parse(localStorage.getItem(BATCH_KEY) || "null");
+          if (saved?.inProgress && saved.pendingIds?.length) {
+            const pendingItems = loadedList.filter((t) => saved.pendingIds.includes(t.id));
+            if (pendingItems.length) {
+              runBatchTuning(pendingItems, saved.instruction ?? "");
+            } else {
+              localStorage.removeItem(BATCH_KEY);
+            }
+          }
+        } catch { /* localStorage 파싱 실패 무시 */ }
       });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -122,6 +145,72 @@ export default function HarnessTemplateTab() {
     setTuning(false);
   }
 
+  // ── 일괄 튜닝 핵심 로직 (초기 시작 + 재개 공용) ──────────────
+  async function runBatchTuning(items: TemplateMeta[], instruction: string) {
+    if (!items.length) return;
+    setBatchTuning(true);
+
+    // 남은 항목 ID를 localStorage에 저장 (페이지 이동 후 재개용)
+    const savePending = (pendingIds: string[]) => {
+      try {
+        if (pendingIds.length === 0) {
+          localStorage.removeItem(BATCH_KEY);
+        } else {
+          localStorage.setItem(BATCH_KEY, JSON.stringify({ inProgress: true, pendingIds, instruction }));
+        }
+      } catch { /* 무시 */ }
+    };
+
+    const total = items.length;
+    savePending(items.map((t) => t.id));
+
+    for (let i = 0; i < items.length; i++) {
+      const item = items[i];
+      setBatchProgress({ current: i + 1, total, label: item.label });
+
+      try {
+        const res = await fetch("/api/setup/harness-templates", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id: item.id, instruction }),
+        });
+        if (!res.ok || !res.body) continue;
+
+        // SSE 스트림을 끝까지 소비 (완료 신호 대기)
+        const reader = res.body.getReader();
+        const dec = new TextDecoder();
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          for (const line of dec.decode(value).split("\n")) {
+            if (!line.startsWith("data: ")) continue;
+            const raw = line.slice(6).trim();
+            if (!raw) continue;
+            try {
+              const event = JSON.parse(raw);
+              if (event.type === "done") {
+                setList((prev) => prev.map((t) => t.id === item.id ? { ...t, tuned: true } : t));
+              }
+            } catch { /* JSON 파싱 실패 무시 */ }
+          }
+        }
+      } catch { /* 개별 실패 건너뜀 */ }
+
+      // 완료된 항목을 pending에서 제거
+      savePending(items.slice(i + 1).map((t) => t.id));
+    }
+
+    setBatchTuning(false);
+    setBatchProgress(null);
+    localStorage.removeItem(BATCH_KEY);
+  }
+
+  // ── 일괄 튜닝 시작 (UI 버튼 → 전체 doc 목록으로 실행) ─────────
+  function startBatchTuning() {
+    const docItems = list.filter((t) => t.category === "doc");
+    runBatchTuning(docItems, batchInstruction);
+  }
+
   // ── 편집 저장 ──────────────────────────────────────────────
   async function saveEdit() {
     if (!selectedId || !editContent.trim()) return;
@@ -160,9 +249,21 @@ export default function HarnessTemplateTab() {
           if (!items.length) return null;
           return (
             <div key={cat}>
-              <p className="text-[10px] font-semibold text-zinc-600 uppercase tracking-widest mb-1.5 px-1">
-                {CATEGORY_LABEL[cat]}
-              </p>
+              {/* 가이드 문서 섹션: 일괄 튜닝 버튼 함께 표시 */}
+              <div className="flex items-center justify-between mb-1.5 px-1">
+                <p className="text-[10px] font-semibold text-zinc-600 uppercase tracking-widest">
+                  {CATEGORY_LABEL[cat]}
+                </p>
+                {cat === "doc" && (
+                  <button
+                    onClick={startBatchTuning}
+                    disabled={batchTuning || tuning}
+                    className="text-[9px] px-1.5 py-0.5 bg-indigo-700 hover:bg-indigo-600 disabled:opacity-50 text-white rounded transition-colors font-medium"
+                  >
+                    {batchTuning ? "튜닝 중" : "일괄 튜닝"}
+                  </button>
+                )}
+              </div>
               <div className="space-y-0.5">
                 {items.map((t) => (
                   <button
@@ -187,6 +288,40 @@ export default function HarnessTemplateTab() {
             </div>
           );
         })}
+
+        {/* 일괄 튜닝 진행 상황 */}
+        {batchTuning && batchProgress && (
+          <div className="mt-2 bg-indigo-950/50 border border-indigo-800/50 rounded-lg p-3 space-y-1.5">
+            <div className="flex items-center gap-2">
+              <div className="w-1.5 h-1.5 rounded-full bg-indigo-400 animate-pulse shrink-0" />
+              <p className="text-[10px] text-indigo-300 font-medium">
+                {batchProgress.current}/{batchProgress.total} 튜닝 중
+              </p>
+            </div>
+            <p className="text-[10px] text-indigo-400 truncate">{batchProgress.label}</p>
+            {/* 진행 바 */}
+            <div className="w-full h-1 bg-indigo-900 rounded-full overflow-hidden">
+              <div
+                className="h-full bg-indigo-500 transition-all duration-300"
+                style={{ width: `${(batchProgress.current / batchProgress.total) * 100}%` }}
+              />
+            </div>
+          </div>
+        )}
+
+        {/* 일괄 튜닝용 공통 지시사항 (진행 중이 아닐 때) */}
+        {!batchTuning && (
+          <div className="mt-2 border-t border-zinc-800 pt-3">
+            <p className="text-[9px] text-zinc-600 mb-1.5 uppercase tracking-widest font-semibold">일괄 튜닝 지시사항</p>
+            <textarea
+              value={batchInstruction}
+              onChange={(e) => setBatchInstruction(e.target.value)}
+              placeholder="예: Next.js + TypeScript 환경에 맞게. 코드 예시 구체화."
+              rows={2}
+              className="w-full bg-zinc-900 border border-zinc-800 rounded text-[10px] text-zinc-400 placeholder-zinc-700 p-2 resize-none focus:outline-none focus:border-zinc-700"
+            />
+          </div>
+        )}
       </div>
 
       {/* ── 우측 뷰어 ─────────────────────────────────────── */}
@@ -263,18 +398,20 @@ export default function HarnessTemplateTab() {
                   </>
                 )}
 
-                {/* AI 튜닝 버튼 (액션 템플릿만) */}
-                {isAction && !editing && (
+                {/* AI 튜닝 버튼 (액션 템플릿 + 가이드 문서 모두) */}
+                {!editing && (
                   <button
                     onClick={startTuning}
                     disabled={tuning}
                     className={`px-4 py-1.5 text-xs rounded-lg font-medium transition-colors ${
                       content?.hasTuned
                         ? "border border-zinc-700 hover:border-zinc-500 text-zinc-300"
-                        : "bg-blue-600 hover:bg-blue-500 text-white"
+                        : isAction
+                          ? "bg-blue-600 hover:bg-blue-500 text-white"
+                          : "bg-indigo-700 hover:bg-indigo-600 text-white"
                     }`}
                   >
-                    {tuning ? "튜닝 중..." : content?.hasTuned ? "재튜닝" : "이 프로젝트에 맞게 튜닝"}
+                    {tuning ? "튜닝 중..." : content?.hasTuned ? "재튜닝" : isAction ? "이 프로젝트에 맞게 튜닝" : "프로젝트 맞춤 요약"}
                   </button>
                 )}
               </div>
@@ -287,8 +424,8 @@ export default function HarnessTemplateTab() {
               </div>
             )}
 
-            {/* 지시사항 입력 (액션 템플릿만, 튜닝 전) */}
-            {isAction && !editing && !tuning && (
+            {/* 지시사항 입력 (튜닝 전 전체 표시) */}
+            {!editing && !tuning && (
               <div className="bg-zinc-900 border border-zinc-800 rounded-xl px-4 pt-3 pb-3">
                 <p className="text-[10px] font-semibold text-zinc-500 uppercase tracking-widest mb-2">
                   AI 지시사항{" "}
@@ -299,7 +436,10 @@ export default function HarnessTemplateTab() {
                 <textarea
                   value={instruction}
                   onChange={(e) => setInstruction(e.target.value)}
-                  placeholder="예: 스프린트를 2주 단위로 조정해줘. TypeScript 타입 엄격하게. QA 기준을 더 엄격하게."
+                  placeholder={isAction
+                    ? "예: 스프린트를 2주 단위로 조정해줘. TypeScript 타입 엄격하게. QA 기준을 더 엄격하게."
+                    : "예: 이 프로젝트의 Next.js 환경에 맞게 예시를 구체화해줘. 실패 패턴 중 비동기 관련 항목 강조."
+                  }
                   rows={2}
                   className="w-full bg-transparent text-xs text-zinc-300 placeholder-zinc-600 resize-none focus:outline-none leading-relaxed"
                 />

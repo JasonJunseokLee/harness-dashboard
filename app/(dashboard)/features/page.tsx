@@ -2,7 +2,6 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
-import InstructionInput from "@/app/components/InstructionInput";
 import ReactFlow, {
   Node, Edge, Background, Controls,
   useNodesState, useEdgesState, BackgroundVariant,
@@ -13,6 +12,7 @@ import { applyDagreLayout } from "@/app/lib/dagre-layout";
 import TerminalStream from "@/app/components/TerminalStream";
 import SparklesIcon from "@/app/components/SparklesIcon";
 import { ToastStack, type ToastMsg } from "@/app/components/Toast";
+import { useAI } from "@/app/context/AIContext";
 
 // ─── 타입 ─────────────────────────────────────────────────────
 type TreeNodeType = "root" | "category" | "feature" | "subfeature";
@@ -285,6 +285,7 @@ function removeSubtree(nodes: TreeNode[], targetId: string): TreeNode[] {
 // ─── 메인 페이지 ──────────────────────────────────────────────
 export default function FeaturesPage() {
   const router = useRouter();
+  const { setPhase, setPresets, setCurrentContent, registerContentUpdater, unregisterContentUpdater } = useAI();
 
   // 원본 트리 데이터
   const [data, setData] = useState<FeaturesData | null>(null);
@@ -300,11 +301,6 @@ export default function FeaturesPage() {
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
 
-  // 지시사항 + 이전 버전
-  const [instruction, setInstruction] = useState("");
-  const instructionRef = useRef(""); // useCallback 내부에서 최신값 읽기용
-  const [prevData, setPrevData] = useState<FeaturesData | null>(null);
-  const [viewingPrev, setViewingPrev] = useState(false);
 
   // ── AI 확장 상태 ──────────────────────────────────────────────
   const [expandingNodeId, setExpandingNodeId] = useState<string | null>(null);
@@ -322,8 +318,6 @@ export default function FeaturesPage() {
     setToasts((p) => p.filter((t) => t.id !== id));
   }, []);
 
-  // instruction state → ref 동기화
-  useEffect(() => { instructionRef.current = instruction; }, [instruction]);
 
   // 자동 저장 타이머
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -567,6 +561,8 @@ export default function FeaturesPage() {
 
   // ── 초기 로드 ───────────────────────────────────────────────
   useEffect(() => {
+    setPhase("features");
+    setPresets(["MVP 기능만 남기기", "기능 설명 구체화", "의존성 관계 추가", "우선순위 재정렬"]);
     fetch("/api/features")
       .then((r) => r.json())
       .then((d) => {
@@ -575,13 +571,17 @@ export default function FeaturesPage() {
           syncFlow(d.data, null);
         }
       });
-    fetch("/api/features?prev=true")
-      .then((r) => r.json())
-      .then((d) => { if (d.exists && d.data?.treeNodes) setPrevData(d.data); });
     fetch("/api/prd")
       .then((r) => r.json())
       .then((d) => setHasPrd(d.exists));
-  }, []);
+  }, [setPhase, setPresets, syncFlow]);
+
+  // 글로벌 AI Context에 Features 데이터 등록
+  useEffect(() => {
+    setCurrentContent(data);
+    registerContentUpdater(setData);
+    return () => unregisterContentUpdater();
+  }, [data, setCurrentContent, registerContentUpdater, unregisterContentUpdater]);
 
   // 선택 변경 시 Flow 재동기화
   useEffect(() => {
@@ -590,10 +590,6 @@ export default function FeaturesPage() {
 
   // ── AI 생성 ─────────────────────────────────────────────────
   const generate = useCallback(async () => {
-    // 현재 데이터를 이전 버전으로 보관
-    setData((cur) => { if (cur) setPrevData(cur); return cur; });
-    setViewingPrev(false);
-
     setGenerating(true);
     setGenDone(false);
     setStreamText("");
@@ -606,7 +602,7 @@ export default function FeaturesPage() {
     const res = await fetch("/api/features", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ instruction: instructionRef.current }),
+      body: JSON.stringify({ instruction: "" }),
     });
     if (!res.ok) { setError("PRD를 먼저 생성해주세요."); setGenerating(false); return; }
 
@@ -675,16 +671,6 @@ export default function FeaturesPage() {
               </button>
             )}
             {/* 이전 버전 토글 */}
-            {prevData && !generating && (
-              <button
-                onClick={() => { setViewingPrev((v) => !v); if (!viewingPrev && prevData) { setData(prevData); syncFlow(prevData, null); } else if (data) syncFlow(data, null); }}
-                className={`px-3 py-1.5 rounded-lg text-xs transition-colors border ${
-                  viewingPrev ? "bg-amber-900/40 border-amber-700 text-amber-300" : "border-zinc-700 hover:border-zinc-500 text-zinc-500"
-                }`}
-              >
-                {viewingPrev ? "현재 버전으로" : "↩ 이전 버전"}
-              </button>
-            )}
             {!data && !generating && (
               <button onClick={hasPrd ? generate : () => router.push("/prd")}
                 className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm font-medium transition-colors">
@@ -698,16 +684,6 @@ export default function FeaturesPage() {
               </button>
             )}
           </div>
-        </div>
-
-        {/* 지시사항 입력창 */}
-        <div className="shrink-0 px-6 pt-3 pb-0">
-          <InstructionInput
-            value={instruction}
-            onChange={setInstruction}
-            disabled={generating}
-            placeholder="예: 결제 흐름을 더 세분화해줘. 관리자 기능을 별도 카테고리로 분리해줘."
-          />
         </div>
 
         {/* 생성 중 — 진행률 */}

@@ -1,12 +1,8 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef } from "react";
 import TerminalStream from "@/app/components/TerminalStream";
-import InstructionInput from "@/app/components/InstructionInput";
-import RefinementPanel from "@/app/components/RefinementPanel";
-import VersionHistoryPanel from "@/app/components/VersionHistoryPanel";
-import VersionDiffViewer from "@/app/components/VersionDiffViewer";
-import { useAIRefinement } from "@/app/lib/useAIRefinement";
+import { useAI } from "@/app/context/AIContext";
 
 // ─── 타입 ─────────────────────────────────────────────────────
 type MemoryFile = {
@@ -51,33 +47,10 @@ export default function SprintPlanPage() {
   const [generating, setGenerating] = useState(false);
   const [genDone, setGenDone] = useState(false);
   const [streamText, setStreamText] = useState("");
-  const [instruction, setInstruction] = useState("");
+  const [error, setError] = useState("");
 
-  // 이전 버전
-  const [prevPlan, setPrevPlan] = useState("");
-  const [viewingPrev, setViewingPrev] = useState(false);
-
-  // AI 수정 기능 (diff 뷰어용)
-  const [showDiff, setShowDiff] = useState(false);
-  const [diffV1, setDiffV1] = useState("");
-  const [diffV2, setDiffV2] = useState("");
-
-  // useAIRefinement 훅 통합 (마크다운 형식)
-  const {
-    handleRefine,
-    handleRestore,
-    handleSelectVersion,
-    isRefining,
-    refineProgress,
-    currentVersion,
-    versionRefresh,
-    error: refinementError,
-  } = useAIRefinement({
-    phase: "sprint-plan",
-    format: "markdown",
-    currentContent: sprintPlan,
-    onContentChange: setSprintPlan,
-  });
+  // 글로벌 AI Context
+  const { setPhase, setPresets, setCurrentContent, registerContentUpdater, unregisterContentUpdater } = useAI();
 
   // ── 메모리 상태 ────────────────────────────────────────────
   const [memoryFiles, setMemoryFiles] = useState<MemoryFile[]>([]);
@@ -87,21 +60,22 @@ export default function SprintPlanPage() {
 
   // ── 초기 로드 ──────────────────────────────────────────────
   useEffect(() => {
+    setPhase("sprint-plan");
+    setPresets(["스토리 포인트 재산정", "완료 기준 강화", "리스크 항목 추가", "우선순위 재조정"]);
     // 스프린트 플랜
     fetch("/api/setup/sprint-plan")
       .then(r => r.json())
       .then(d => { if (d.exists) { setSprintPlan(d.content); setSprintExists(true); } });
-    // 이전 버전
-    fetch("/api/setup/sprint-plan?prev=true")
-      .then(r => r.json())
-      .then(d => { if (d.exists) setPrevPlan(d.content); });
-    // 초기 버전 정보 로드 (useAIRefinement 내부에서 사용)
-    fetch("/api/ai-results/sprint-plan/versions")
-      .then(r => r.json())
-      .catch(() => {});
     // 메모리
     loadMemory();
-  }, []);
+  }, [setPhase, setPresets]);
+
+  // 글로벌 AI Context에 스프린트 플랜 등록
+  useEffect(() => {
+    setCurrentContent(sprintPlan);
+    registerContentUpdater(setSprintPlan);
+    return () => unregisterContentUpdater();
+  }, [sprintPlan, setCurrentContent, registerContentUpdater, unregisterContentUpdater]);
 
   // ── 메모리 폴링 (3초 간격) ──────────────────────────────────
   useEffect(() => {
@@ -122,19 +96,17 @@ export default function SprintPlanPage() {
 
   // ── 생성 ───────────────────────────────────────────────────
   async function generate() {
-    // 현재 내용을 이전 버전으로 백업
-    if (sprintPlan) setPrevPlan(sprintPlan);
     setGenerating(true);
     setGenDone(false);
     setStreamText("");
     setSprintPlan("");
-    setViewingPrev(false);
+    setError("");
 
     let full = "";
     const res = await fetch("/api/setup/sprint-plan", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ instruction }),
+      body: JSON.stringify({ instruction: "" }),
     });
     if (!res.ok || !res.body) { setGenerating(false); return; }
 
@@ -155,19 +127,6 @@ export default function SprintPlanPage() {
     setGenerating(false);
   }
 
-  // ── 이전 버전 복원 ─────────────────────────────────────────
-  async function restorePrev() {
-    if (!prevPlan) return;
-    await fetch("/api/setup/sprint-plan", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ content: prevPlan }),
-    });
-    setSprintPlan(prevPlan);
-    setViewingPrev(false);
-  }
-
-  const displayContent = viewingPrev ? prevPlan : sprintPlan;
 
   // ─── 렌더링 ────────────────────────────────────────────────
   return (
@@ -186,14 +145,6 @@ export default function SprintPlanPage() {
               </p>
             </div>
             <div className="flex gap-2 shrink-0 mt-1">
-              {prevPlan && !viewingPrev && (
-                <button
-                  onClick={() => setViewingPrev(true)}
-                  className="px-3 py-2 border border-amber-900 text-amber-500 hover:border-amber-700 rounded-lg text-sm transition-colors"
-                >
-                  ↩ 이전 버전
-                </button>
-              )}
               {sprintExists && !generating && (
                 <button
                   onClick={generate}
@@ -213,34 +164,6 @@ export default function SprintPlanPage() {
             </div>
           </div>
 
-          {/* 지시사항 */}
-          <InstructionInput
-            value={instruction}
-            onChange={setInstruction}
-            disabled={generating}
-            placeholder="예: 스프린트를 2주 단위로 잡아줘. MVP 범위를 2개 스프린트로 제한해줘."
-          />
-
-          {/* 이전 버전 배너 */}
-          {viewingPrev && (
-            <div className="bg-amber-950 border border-amber-800 rounded-xl px-4 py-3 flex items-center justify-between">
-              <span className="text-amber-400 text-sm">이전 버전을 보고 있습니다</span>
-              <div className="flex gap-2">
-                <button
-                  onClick={() => setViewingPrev(false)}
-                  className="px-3 py-1.5 text-xs border border-amber-800 text-amber-500 rounded-lg hover:border-amber-600 transition-colors"
-                >
-                  현재 버전으로
-                </button>
-                <button
-                  onClick={restorePrev}
-                  className="px-3 py-1.5 text-xs bg-amber-700 hover:bg-amber-600 text-white rounded-lg transition-colors"
-                >
-                  이 버전으로 복원
-                </button>
-              </div>
-            </div>
-          )}
 
           {/* 생성 중 터미널 */}
           {(generating || genDone) && (
@@ -254,47 +177,12 @@ export default function SprintPlanPage() {
             </div>
           )}
 
-          {/* ── 2칼럼 레이아웃: 콘텐츠 + 사이드 패널 ── */}
-          {displayContent && !generating && (
-            <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-4">
-              {/* 왼쪽: 스프린트 플랜 콘텐츠 */}
-              <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-6">
-                <pre className="text-sm text-zinc-300 whitespace-pre-wrap leading-relaxed font-mono">
-                  {displayContent}
-                </pre>
-              </div>
-
-              {/* 오른쪽: 수정 + 버전 관리 패널 */}
-              {!viewingPrev && (
-                <div className="space-y-4">
-                  {/* AI 수정 요청 패널 */}
-                  <RefinementPanel
-                    onRefine={handleRefine}
-                    isRefining={isRefining}
-                    progressText={refineProgress}
-                    presets={SPRINT_PRESETS}
-                  />
-
-                  {/* 버전 히스토리 패널 */}
-                  <VersionHistoryPanel
-                    phase="sprint-plan"
-                    onSelectVersion={handleSelectVersion}
-                    onRestore={handleRestore}
-                    currentVersion={currentVersion}
-                    refreshTrigger={versionRefresh}
-                  />
-
-                  {/* Diff 뷰어 */}
-                  {showDiff && diffV1 && diffV2 && (
-                    <VersionDiffViewer
-                      phase="sprint-plan"
-                      v1={diffV1}
-                      v2={diffV2}
-                      onClose={() => setShowDiff(false)}
-                    />
-                  )}
-                </div>
-              )}
+          {/* 스프린트 플랜 콘텐츠 */}
+          {sprintPlan && !generating && (
+            <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-6">
+              <pre className="text-sm text-zinc-300 whitespace-pre-wrap leading-relaxed font-mono">
+                {sprintPlan}
+              </pre>
             </div>
           )}
 

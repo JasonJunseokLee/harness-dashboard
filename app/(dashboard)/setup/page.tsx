@@ -2,11 +2,10 @@
 
 import { useState, useEffect, useCallback } from "react";
 import TerminalStream from "@/app/components/TerminalStream";
-import InstructionInput from "@/app/components/InstructionInput";
 import HarnessTemplateTab from "@/app/components/HarnessTemplateTab";
 import VersionHistoryPanel from "@/app/components/VersionHistoryPanel";
-import RefinementPanel from "@/app/components/RefinementPanel";
 import VersionDiffViewer from "@/app/components/VersionDiffViewer";
+import { useAI } from "@/app/context/AIContext";
 
 // ─── 탭 타입 ─────────────────────────────────────────────────
 type Tab = "claudemd" | "design" | "templates";
@@ -31,6 +30,7 @@ function Panel({ children }: { children: React.ReactNode }) {
 
 // ─── 메인 페이지 ─────────────────────────────────────────────
 export default function SetupPage() {
+  const { setPhase, setPresets, setCurrentContent, registerContentUpdater, unregisterContentUpdater } = useAI();
   const [tab, setTab] = useState<Tab>("claudemd");
 
   // ── CLAUDE.md 상태 ─────────────────────────────────────────
@@ -79,7 +79,29 @@ export default function SetupPage() {
       .then(r => r.json())
       .then(d => { if (d.current) setCurrentVersion(d.current); })
       .catch(() => {});
-  }, []);
+  }, []); // 마운트 시 1회만
+
+  // ── 탭 전환 시 AI Context(phase/presets/content) 업데이트 ──
+  useEffect(() => {
+    if (tab === "claudemd") {
+      setPhase("claude-md");
+      setPresets(["한글 주석 보강", "금지 패턴 추가", "Definition of Done 강화", "코딩 컨벤션 추가"]);
+      setCurrentContent(claudeMd);
+      registerContentUpdater(setClaudeMd);
+    } else if (tab === "design") {
+      setPhase("design");
+      setPresets(["색상 토큰 추가", "컴포넌트 패턴 구체화", "반응형 규칙 강화", "접근성 가이드 추가"]);
+      setCurrentContent(designGuide);
+      registerContentUpdater(setDesignGuide);
+    } else {
+      // templates 탭
+      setPhase("setup");
+      setPresets(["프로젝트 맞춤 튜닝", "체크리스트 구체화", "평가 기준 강화", "스프린트 기간 조정"]);
+      setCurrentContent(null);
+      unregisterContentUpdater();
+    }
+    return () => unregisterContentUpdater();
+  }, [tab, claudeMd, designGuide, setPhase, setPresets, setCurrentContent, registerContentUpdater, unregisterContentUpdater]);
 
   // ─── SSE 스트리밍 공통 헬퍼 ──────────────────────────────
   async function streamFromApi(
@@ -353,16 +375,6 @@ export default function SetupPage() {
               </div>
             </div>
 
-            {/* 초기 생성 지시사항 */}
-            {!claudeMdExists && (
-              <InstructionInput
-                value={claudeInstruction}
-                onChange={setClaudeInstruction}
-                disabled={generatingClaude}
-                placeholder="예: 한글 주석 규칙을 강조해줘. 테스트 섹션을 추가해줘. Definition of Done을 더 엄격하게."
-              />
-            )}
-
             {/* 저장 완료 메시지 */}
             {claudeSavedMsg && (
               <div className="bg-green-950 border border-green-800 rounded-lg px-4 py-2 text-green-300 text-sm">
@@ -433,14 +445,6 @@ export default function SetupPage() {
                     />
                   )}
 
-                  {/* AI 수정 패널 */}
-                  {!claudeEditing && (
-                    <RefinementPanel
-                      onRefine={handleRefine}
-                      isRefining={isRefining}
-                      progressText={refineProgress}
-                    />
-                  )}
                 </div>
 
                 {/* 오른쪽: 버전 히스토리 */}
@@ -500,14 +504,6 @@ export default function SetupPage() {
               </div>
             </div>
 
-            {/* 지시사항 */}
-            <InstructionInput
-              value={designInstruction}
-              onChange={setDesignInstruction}
-              disabled={generatingDesign}
-              placeholder="예: 다크 모드 중심으로 작성해줘. shadcn/ui 컴포넌트 기준으로. 모바일 우선 반응형 규칙 포함."
-            />
-
             {/* 생성 중 터미널 출력 */}
             {(generatingDesign || designDone) && (
               <Panel>
@@ -538,23 +534,21 @@ export default function SetupPage() {
           </div>
         )}
 
-        {/* ── TAB: 하네스 템플릿 ── */}
-        {tab === "templates" && (
-          <div className="space-y-4">
-            <div>
-              <p className="text-sm text-zinc-400">
-                하네스 엔지니어링 템플릿 4종 + 가이드 문서 14종을 확인하고, 이 프로젝트에 맞게 AI로 튜닝합니다.
-              </p>
-              <p className="text-xs text-zinc-600 mt-0.5">
-                튜닝된 버전은 <code className="text-zinc-500">.harness/templates/</code>에 저장됩니다.
-                <span className="ml-2 text-zinc-700">● 초록 점 = 튜닝 완료</span>
-              </p>
-            </div>
-            <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-5">
-              <HarnessTemplateTab />
-            </div>
+        {/* ── TAB: 하네스 템플릿 ── 항상 마운트, 탭이 아닐 때 hidden (일괄 튜닝 유지) */}
+        <div className={tab === "templates" ? "space-y-4" : "hidden"}>
+          <div>
+            <p className="text-sm text-zinc-400">
+              하네스 엔지니어링 템플릿 4종 + 가이드 문서 13종을 확인하고, 이 프로젝트에 맞게 AI로 튜닝합니다.
+            </p>
+            <p className="text-xs text-zinc-600 mt-0.5">
+              튜닝된 버전은 <code className="text-zinc-500">.harness/templates/</code>에 저장됩니다.
+              <span className="ml-2 text-zinc-700">● 초록 점 = 튜닝 완료</span>
+            </p>
           </div>
-        )}
+          <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-5">
+            <HarnessTemplateTab />
+          </div>
+        </div>
       </div>
     </main>
   );

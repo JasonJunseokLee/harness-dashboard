@@ -1,13 +1,9 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import TerminalStream from "@/app/components/TerminalStream";
-import InstructionInput from "@/app/components/InstructionInput";
-import RefinementPanel from "@/app/components/RefinementPanel";
-import VersionHistoryPanel from "@/app/components/VersionHistoryPanel";
-import VersionDiffViewer from "@/app/components/VersionDiffViewer";
-import { useAIRefinement } from "@/app/lib/useAIRefinement";
+import { useAI } from "@/app/context/AIContext";
 
 // ─── 타입 ────────────────────────────────────────────────────
 type PRDData = {
@@ -145,69 +141,32 @@ export default function PRDPage() {
   const [error, setError] = useState("");
   const [hasProject, setHasProject] = useState(true);
 
-  // 지시사항 + 이전 버전
-  const [instruction, setInstruction] = useState("");
-  const [prevPrd, setPrevPrd] = useState<PRDData | null>(null);
-  const [viewingPrev, setViewingPrev] = useState(false);
 
-  // AI 수정 기능 (diff 뷰어용)
-  const [showDiff, setShowDiff] = useState(false);
-  const [diffV1, setDiffV1] = useState("");
-  const [diffV2, setDiffV2] = useState("");
+  // 글로벌 AI Context
+  const { setPhase, setPresets, setCurrentContent, registerContentUpdater, unregisterContentUpdater } = useAI();
 
-  // useAIRefinement 훅 통합
-  const {
-    handleRefine,
-    handleRestore,
-    handleSelectVersion,
-    isRefining,
-    refineProgress,
-    currentVersion,
-    versionRefresh,
-    error: refinementError,
-  } = useAIRefinement({
-    phase: "prd",
-    format: "json",
-    currentContent: prd || ({} as PRDData),
-    onContentChange: setPrd,
-  });
-
-  // 저장된 PRD + 이전 버전 + 현재 버전 정보 불러오기
+  // 저장된 PRD + 프로젝트 정보 불러오기
   useEffect(() => {
+    setPhase("prd");
+    setPresets(["타겟 사용자 구체화", "성공 지표 추가", "기능 우선순위 재정렬", "비기능 요구사항 강화"]);
     fetch("/api/prd")
       .then((r) => r.json())
       .then((d) => { if (d.exists) setPrd(d.data); });
-    fetch("/api/prd?prev=true")
-      .then((r) => r.json())
-      .then((d) => { if (d.exists) setPrevPrd(d.data); });
     fetch("/api/project")
       .then((r) => r.json())
       .then((d) => setHasProject(d.exists));
-    // 초기 버전 정보 로드 (useAIRefinement 내부에서 사용)
-    fetch("/api/ai-results/prd/versions")
-      .then((r) => r.json())
-      .catch(() => {});
-  }, []);
+  }, [setPhase, setPresets]);
 
-  // 이전 버전으로 복원
-  async function restorePrev() {
-    if (!prevPrd) return;
-    await fetch("/api/prd", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(prevPrd),
-    });
-    setPrd(prevPrd);
-    setPrevPrd(null);
-    setViewingPrev(false);
-  }
+  // 글로벌 AI Context에 PRD 콘텐츠 등록
+  // AIDrawer에서 PRD를 수정하면 setPrd가 호출됨
+  useEffect(() => {
+    setCurrentContent(prd);
+    registerContentUpdater(setPrd);
+    return () => unregisterContentUpdater();
+  }, [prd, setCurrentContent, registerContentUpdater, unregisterContentUpdater]);
 
   // PRD 생성 (SSE 스트리밍)
   async function generatePRD() {
-    // 현재 PRD를 이전 버전으로 저장
-    if (prd) setPrevPrd(prd);
-    setViewingPrev(false);
-
     setGenerating(true);
     setGenDone(false);
     setStreamText("");
@@ -217,7 +176,7 @@ export default function PRDPage() {
     const res = await fetch("/api/prd", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ instruction }),
+      body: JSON.stringify({ instruction: "" }),
     });
     if (!res.ok) {
       setError("온보딩을 먼저 완료해주세요.");
@@ -270,19 +229,6 @@ export default function PRDPage() {
                 재생성
               </button>
             )}
-            {/* 이전 버전 토글 버튼 */}
-            {prevPrd && !generating && (
-              <button
-                onClick={() => setViewingPrev((v) => !v)}
-                className={`px-4 py-2 rounded-lg text-sm transition-colors border ${
-                  viewingPrev
-                    ? "bg-amber-900/40 border-amber-700 text-amber-300"
-                    : "border-zinc-700 hover:border-zinc-500 text-zinc-500 hover:text-zinc-300"
-                }`}
-              >
-                {viewingPrev ? "현재 버전으로" : "↩ 이전 버전"}
-              </button>
-            )}
             {!prd && !generating && (
               <button
                 onClick={hasProject ? generatePRD : () => router.push("/onboarding")}
@@ -294,34 +240,6 @@ export default function PRDPage() {
           </div>
         </div>
 
-        {/* 지시사항 입력창 */}
-        <InstructionInput
-          value={instruction}
-          onChange={setInstruction}
-          disabled={generating}
-          placeholder="예: B2B 기업 고객에 집중해줘. KPI는 구독 매출과 이탈률로. 사용 시나리오를 더 구체적으로 써줘."
-        />
-
-        {/* 이전 버전 보기 배너 */}
-        {viewingPrev && prevPrd && (
-          <div className="flex items-center justify-between bg-amber-950 border border-amber-800 rounded-xl px-4 py-3">
-            <span className="text-amber-300 text-sm font-medium">이전 버전 보기 중</span>
-            <div className="flex gap-2">
-              <button
-                onClick={() => setViewingPrev(false)}
-                className="px-3 py-1.5 text-xs text-amber-400 hover:text-amber-200 transition-colors"
-              >
-                현재 버전으로 돌아가기
-              </button>
-              <button
-                onClick={restorePrev}
-                className="px-3 py-1.5 bg-amber-800 hover:bg-amber-700 text-amber-100 rounded-lg text-xs font-medium transition-colors"
-              >
-                이 버전으로 복원
-              </button>
-            </div>
-          </div>
-        )}
 
         {/* 생성 중 — 진행률 표시 */}
         {(generating || genDone) && !error && (
@@ -335,51 +253,16 @@ export default function PRDPage() {
         )}
 
         {/* 오류 */}
-        {(error || refinementError) && (
+        {error && (
           <div className="bg-red-950 border border-red-800 rounded-xl p-4 mb-6 text-red-300 text-sm">
-            {error || refinementError}
+            {error}
           </div>
         )}
 
-        {/* ── 2칼럼 레이아웃: 뷰어 + 사이드 패널 ── */}
-        {(viewingPrev ? prevPrd : prd) && !generating && (
-          <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-4">
-            {/* 왼쪽: PRD 뷰어 */}
-            <div className="space-y-4">
-              <PRDViewer prd={(viewingPrev ? prevPrd : prd)!} />
-            </div>
-
-            {/* 오른쪽: 수정 + 버전 관리 패널 */}
-            {!viewingPrev && prd && (
-              <div className="space-y-4">
-                {/* AI 수정 요청 패널 */}
-                <RefinementPanel
-                  onRefine={handleRefine}
-                  isRefining={isRefining}
-                  progressText={refineProgress}
-                  presets={PRD_PRESETS}
-                />
-
-                {/* 버전 히스토리 패널 */}
-                <VersionHistoryPanel
-                  phase="prd"
-                  onSelectVersion={handleSelectVersion}
-                  onRestore={handleRestore}
-                  currentVersion={currentVersion}
-                  refreshTrigger={versionRefresh}
-                />
-
-                {/* Diff 뷰어 */}
-                {showDiff && diffV1 && diffV2 && (
-                  <VersionDiffViewer
-                    phase="prd"
-                    v1={diffV1}
-                    v2={diffV2}
-                    onClose={() => setShowDiff(false)}
-                  />
-                )}
-              </div>
-            )}
+        {/* PRD 뷰어 */}
+        {prd && !generating && (
+          <div className="space-y-4">
+            <PRDViewer prd={prd} />
           </div>
         )}
 

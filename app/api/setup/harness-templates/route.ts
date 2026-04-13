@@ -61,7 +61,6 @@ export const TEMPLATES = [
   { id: 'doc-06', category: 'doc' as const, file: 'docs/06-harness-evolution.md', label: '06 하네스 진화', desc: '모델 발전에 따른 하네스 업데이트 원칙' },
   { id: 'doc-07', category: 'doc' as const, file: 'docs/07-cost-tradeoff.md', label: '07 비용 트레이드오프', desc: '품질 vs 비용 균형 결정 기준' },
   { id: 'doc-08', category: 'doc' as const, file: 'docs/08-when-to-use.md', label: '08 적용 판단', desc: '하네스 레벨 선택 체크리스트' },
-  { id: 'doc-09', category: 'doc' as const, file: 'docs/09-claude-md-design.md', label: '09 CLAUDE.md 설계', desc: '에이전트가 따르는 CLAUDE.md 작성 원칙' },
   { id: 'doc-10', category: 'doc' as const, file: 'docs/10-hooks-and-skills.md', label: '10 Hooks & Skills', desc: '자동화 훅과 재사용 스킬 설계 가이드' },
   { id: 'doc-11', category: 'doc' as const, file: 'docs/11-visual-qa-protocol.md', label: '11 시각 QA 프로토콜', desc: '브라우저 기반 시각 검증 절차' },
   { id: 'doc-12', category: 'doc' as const, file: 'docs/12-failure-catalog.md', label: '12 실패 카탈로그', desc: '반복되는 실패 패턴과 방지법' },

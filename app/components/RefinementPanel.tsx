@@ -9,6 +9,7 @@ interface RefinementPanelProps {
   progressText: string;
   error?: string | null;  // 에러 메시지 (선택사항)
   presets?: string[];     // phase별 프리셋 (기본: claude-md 프리셋)
+  hasContent?: boolean;   // 콘텐츠 있는지 여부 (false면 생성, true면 수정 모드)
 }
 
 // ─── 수정 지시사항 입력 패널 ────────────────────────────────────
@@ -18,6 +19,7 @@ export default function RefinementPanel({
   progressText,
   error,
   presets: customPresets,
+  hasContent = true,
 }: RefinementPanelProps) {
   const [instruction, setInstruction] = useState("");
 
@@ -27,6 +29,14 @@ export default function RefinementPanel({
     await onRefine(instruction.trim());
     setInstruction("");
   };
+
+  // 모드 결정: 콘텐츠 있으면 수정, 없으면 생성
+  const isGenerateMode = !hasContent;
+  const modeLabel = isGenerateMode ? "생성 요청" : "AI 수정 요청";
+  const submitButtonLabel = isGenerateMode ? "생성하기" : "수정 요청";
+  const placeholderText = isGenerateMode
+    ? "예: B2B 기업 중심으로. 사용자 역할은 관리자와 일반사용자로 분리해줘."
+    : "예: '색상 토큰 섹션 추가' 또는 '에러 처리 규칙을 더 엄격하게'";
 
   // 빠른 선택 프리셋 (props로 받은 것 사용, 아니면 기본값)
   const presets = customPresets ?? [
@@ -38,7 +48,7 @@ export default function RefinementPanel({
 
   return (
     <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-4">
-      <h3 className="text-zinc-100 font-semibold mb-3 text-sm">AI 수정 요청</h3>
+      <h3 className="text-zinc-100 font-semibold mb-3 text-sm">{modeLabel}</h3>
 
       <form onSubmit={handleSubmit} className="space-y-3">
         {/* 프리셋 버튼 */}
@@ -60,7 +70,7 @@ export default function RefinementPanel({
         <textarea
           value={instruction}
           onChange={(e) => setInstruction(e.target.value)}
-          placeholder="예: '색상 토큰 섹션 추가' 또는 '에러 처리 규칙을 더 엄격하게'"
+          placeholder={placeholderText}
           disabled={isRefining}
           rows={3}
           className="w-full bg-zinc-800 border border-zinc-700 rounded-lg text-zinc-200 text-sm p-3 placeholder-zinc-600 disabled:opacity-50 focus:outline-none focus:border-zinc-500 resize-none"
@@ -72,7 +82,7 @@ export default function RefinementPanel({
           disabled={!instruction.trim() || isRefining}
           className="w-full bg-blue-600 hover:bg-blue-500 text-white py-2 rounded-lg text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
         >
-          {isRefining ? "수정 중..." : "수정 요청"}
+          {isRefining ? (isGenerateMode ? "생성 중..." : "수정 중...") : submitButtonLabel}
         </button>
       </form>
 

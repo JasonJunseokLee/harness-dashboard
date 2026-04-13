@@ -18,9 +18,13 @@ import * as path from 'path'
 // onboarding-* 은 후속 작업에서 활성화 예정이지만 런타임 가드는 미리 허용
 export const SUPPORTED_PHASES = [
   'claude-md',
+  'design',
   'prd',
   'sprint-plan',
   'ralph-loop',
+  'features',
+  'workflow',
+  'setup',
   'onboarding-analysis',
   'onboarding-questions',
 ] as const
@@ -34,9 +38,13 @@ export type PhaseFormat = 'markdown' | 'json'
 
 export const PHASE_FORMAT: Record<Phase, PhaseFormat> = {
   'claude-md': 'markdown',
+  design: 'markdown',
   prd: 'json',
   'sprint-plan': 'json',
   'ralph-loop': 'json',
+  features: 'json',
+  workflow: 'json',
+  setup: 'json',
   'onboarding-analysis': 'json',
   'onboarding-questions': 'json',
 }
@@ -110,9 +118,13 @@ ${instruction}
 // phase → 프롬프트 빌더 맵
 export const PROMPT_TEMPLATES: Record<Phase, PromptBuilder> = {
   'claude-md': markdownPrompt,
+  design: markdownPrompt,
   prd: makeJsonPrompt('PRD'),
   'sprint-plan': makeJsonPrompt('스프린트 계획'),
   'ralph-loop': makeJsonPrompt('Ralph Loop 설정'),
+  features: makeJsonPrompt('기능 목록'),
+  workflow: makeJsonPrompt('워크플로우'),
+  setup: makeJsonPrompt('셋업 설정'),
   'onboarding-analysis': makeJsonPrompt('온보딩 분석'),
   'onboarding-questions': makeJsonPrompt('온보딩 질문'),
 }
