@@ -170,7 +170,7 @@ decision 노드 이후 엣지에만 label: "예" / "아니오" 표기.
       })
       proc.stderr.on('data', (chunk: Buffer) => {
         const msg = chunk.toString().trim()
-        if (msg) send({ type: 'error', text: msg })
+        if (msg) send({ type: 'text', text: `▸ ${msg}\n` })
       })
       proc.on('close', (code: number) => {
         try {

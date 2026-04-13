@@ -158,7 +158,7 @@ ${analysisSection ? `${analysisSection}\n` : ''}${contextText ? `[원본 참고 
 
       proc.stderr.on('data', (chunk: Buffer) => {
         const msg = chunk.toString().trim()
-        if (msg) send({ type: 'error', text: msg })
+        if (msg) send({ type: 'text', text: `▸ ${msg}\n` })
       })
 
       proc.on('close', (code: number) => {
