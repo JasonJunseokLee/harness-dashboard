@@ -21,10 +21,17 @@ class ProjectPathResolver {
    * 여러 번 호출해도 같은 경로 반환 (캐시됨)
    */
   getTargetProjectPath(): string {
-    if (!this._initialized) {
-      this._resolvePath()
-      this._initialized = true
+    // HARNESS_TARGET 환경변수가 있으면 프로세스 시작 시 1회만 캐시 (포트 분리 방식)
+    // 없으면 ~/.harness-launch.json 을 매 요청마다 다시 읽어 프로젝트 전환 즉시 반영
+    if (process.env.HARNESS_TARGET) {
+      if (!this._initialized) {
+        this._resolvePath()
+        this._initialized = true
+      }
+      return this._targetPath || process.cwd()
     }
+    // launch.json 방식: 캐시 없이 매번 재조회
+    this._resolvePath()
     return this._targetPath || process.cwd()
   }
 
