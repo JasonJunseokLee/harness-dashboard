@@ -5,19 +5,24 @@ import * as path from 'path'
 
 export const runtime = 'nodejs'
 
-const HARNESS = path.join(process.cwd(), '.harness')
-const CONTEXT_DIR = path.join(process.cwd(), 'context')
-const ANALYSIS_FILE = path.join(HARNESS, 'context-analysis.json')
+import { getHarnessDir, getContextDir } from '@/app/lib/project-path'
 
 // GET: 저장된 분석 리포트 반환
 export async function GET() {
-  if (!fs.existsSync(ANALYSIS_FILE)) return NextResponse.json({ exists: false })
-  const data = JSON.parse(fs.readFileSync(ANALYSIS_FILE, 'utf-8'))
+  // 매 요청마다 동적으로 조회 (프로젝트 전환 즉시 반영)
+  const analysisFile = path.join(getHarnessDir(), 'context-analysis.json')
+  if (!fs.existsSync(analysisFile)) return NextResponse.json({ exists: false })
+  const data = JSON.parse(fs.readFileSync(analysisFile, 'utf-8'))
   return NextResponse.json({ exists: true, data })
 }
 
 // POST: 컨텍스트 파일 분석 (SSE 스트리밍)
 export async function POST() {
+  // 매 요청마다 동적으로 경로 조회
+  const HARNESS = getHarnessDir()
+  const CONTEXT_DIR = getContextDir()
+  const ANALYSIS_FILE = path.join(HARNESS, 'context-analysis.json')
+
   // 컨텍스트 디렉토리 확인
   if (!fs.existsSync(CONTEXT_DIR)) {
     return NextResponse.json({ error: '컨텍스트 파일이 없습니다' }, { status: 400 })
