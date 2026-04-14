@@ -541,7 +541,7 @@ export default function SetupPage() {
               하네스 엔지니어링 템플릿 4종 + 가이드 문서 13종을 확인하고, 이 프로젝트에 맞게 AI로 튜닝합니다.
             </p>
             <p className="text-xs text-zinc-600 mt-0.5">
-              튜닝된 버전은 <code className="text-zinc-500">.harness/templates/</code>에 저장됩니다.
+              튜닝된 버전은 대상 프로젝트의 <code className="text-zinc-500">.harness/templates/</code>에 저장됩니다.
               <span className="ml-2 text-zinc-700">● 초록 점 = 튜닝 완료</span>
             </p>
           </div>

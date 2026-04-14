@@ -6,7 +6,8 @@ import { getHarnessDir } from '@/app/lib/project-path'
 
 export const runtime = 'nodejs'
 
-// 하네스 엔지니어링 템플릿 폴더 (환경변수 또는 기본 경로)
+// 하네스 엔지니어링 템플릿 폴더 (우선순위: 환경변수 → 외부 별도 폴더 → 번들 내장 경로)
+const BUNDLED_TEMPLATE_ROOT = path.join(process.cwd(), 'harness-templates')
 const TEMPLATE_ROOT = process.env.HARNESS_TEMPLATE_PATH
   || path.join(process.env.HOME || process.env.USERPROFILE || '', 'CascadeProjects', 'Harness Engeineering Template')
 
@@ -16,6 +17,15 @@ function loadJson(file: string) {
 
 function readFileSafe(filePath: string): string {
   try { return fs.readFileSync(filePath, 'utf-8') } catch { return '' }
+}
+
+// 템플릿 파일을 읽을 때 외부 폴더 → 번들 폴더 순으로 폴백
+function resolveTemplatePath(relativeFile: string): string {
+  const externalPath = path.join(TEMPLATE_ROOT, relativeFile)
+  if (fs.existsSync(externalPath)) return externalPath
+  // 번들 폴더는 서브디렉토리 없이 파일명만 사용 (docs/, templates/ 접두사 제거)
+  const bundledPath = path.join(BUNDLED_TEMPLATE_ROOT, path.basename(relativeFile))
+  return bundledPath
 }
 
 // ─── 템플릿 목록 정의 ─────────────────────────────────────────
@@ -78,7 +88,7 @@ export async function GET(req: NextRequest) {
       const tunedPath = path.join(TUNED_DIR, path.basename(t.file))
       return {
         ...t,
-        exists: fs.existsSync(path.join(TEMPLATE_ROOT, t.file)),
+        exists: fs.existsSync(resolveTemplatePath(t.file)),
         tuned: fs.existsSync(tunedPath),
       }
     })
@@ -89,7 +99,7 @@ export async function GET(req: NextRequest) {
   const tmpl = TEMPLATES.find(t => t.id === id)
   if (!tmpl) return NextResponse.json({ error: '존재하지 않는 템플릿' }, { status: 404 })
 
-  const originalPath = path.join(TEMPLATE_ROOT, tmpl.file)
+  const originalPath = resolveTemplatePath(tmpl.file)
   const tunedPath = path.join(TUNED_DIR, path.basename(tmpl.file))
 
   const original = readFileSafe(originalPath)
@@ -107,8 +117,8 @@ export async function POST(req: NextRequest) {
   const tmpl = TEMPLATES.find(t => t.id === id)
   if (!tmpl) return new Response(JSON.stringify({ error: '존재하지 않는 템플릿' }), { status: 404 })
 
-  // 원본 템플릿 읽기
-  const originalPath = path.join(TEMPLATE_ROOT, tmpl.file)
+  // 원본 템플릿 읽기 (외부 폴더 없으면 번들 harness-templates/ 폴백)
+  const originalPath = resolveTemplatePath(tmpl.file)
   const originalContent = readFileSafe(originalPath)
   if (!originalContent) {
     return new Response(JSON.stringify({ error: '템플릿 파일을 읽을 수 없습니다.' }), { status: 500 })

@@ -8,19 +8,19 @@
 
 ```bash
 # 1. 의존성 설치 (최초 1회)
-cd ~/CascadeProjects/harness-dashboard && npm install
+cd <harness-dashboard 경로> && npm install
 
 # 2. 개발 서버 실행
 npm run dev
 ```
 
-그 후 브라우저에서 http://localhost:3000 을 열면 대시보드가 표시됩니다.
+그 후 브라우저에서 http://localhost:3748 을 열면 대시보드가 표시됩니다.
 
 ## GitHub에서 설치하는 방법
 
 ```bash
-git clone https://github.com/YOUR_USERNAME/harness-dashboard ~/CascadeProjects/harness-dashboard
-cd ~/CascadeProjects/harness-dashboard
+git clone https://github.com/YOUR_USERNAME/harness-dashboard
+cd harness-dashboard
 npm install
 npm run dev
 ```
