@@ -164,19 +164,21 @@ ${analysisSection ? `${analysisSection}\n` : ''}${contextText ? `[원본 참고 
 
       proc.on('close', (code: number) => {
         // 생성 완료 후 JSON 파싱 & 저장
+        if (!fs.existsSync(HARNESS_DIR)) fs.mkdirSync(HARNESS_DIR, { recursive: true })
+
+        // raw 출력은 파싱 성공 여부와 무관하게 항상 저장 (디버그 + 복구용)
+        fs.writeFileSync(path.join(HARNESS_DIR, 'prd.raw.txt'), accumulated, 'utf-8')
+
         try {
           const cleaned = accumulated
             .replace(/```json\n?/g, '')
             .replace(/```\n?/g, '')
             .trim()
           const parsed = JSON.parse(cleaned)
-
-          if (!fs.existsSync(HARNESS_DIR)) fs.mkdirSync(HARNESS_DIR, { recursive: true })
           fs.writeFileSync(PRD_FILE, JSON.stringify(parsed, null, 2), 'utf-8')
-
           send({ type: 'done', code, prd: parsed })
         } catch {
-          send({ type: 'done', code, error: '파싱 실패 — 원문을 확인하세요' })
+          send({ type: 'done', code, error: '파싱 실패 — prd.raw.txt 를 확인하세요' })
         }
         try { controller.close() } catch { /* already closed */ }
       })

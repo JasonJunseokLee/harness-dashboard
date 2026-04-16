@@ -152,6 +152,16 @@ Sprint 0 → Sprint 1 → Sprint 2
 
   const enc = new TextEncoder()
   let fullContent = ''
+  let lastSavedLength = 0
+
+  // 스트리밍 중 파일을 주기적으로 저장 (생성 도중 중단되어도 부분 결과가 남도록)
+  function savePartial() {
+    if (fullContent.length > lastSavedLength) {
+      if (!fs.existsSync(HARNESS)) fs.mkdirSync(HARNESS, { recursive: true })
+      fs.writeFileSync(CACHE_FILE, fullContent, 'utf-8')
+      lastSavedLength = fullContent.length
+    }
+  }
 
   const stream = new ReadableStream({
     start(controller) {
@@ -163,10 +173,12 @@ Sprint 0 → Sprint 1 → Sprint 2
         stdio: ['ignore', 'pipe', 'pipe'],
       })
 
+      // 500자 쌓일 때마다 중간 저장
       proc.stdout.on('data', (chunk: Buffer) => {
         const text = chunk.toString()
         fullContent += text
         send({ type: 'text', text })
+        if (fullContent.length - lastSavedLength > 500) savePartial()
       })
 
       proc.stderr.on('data', (chunk: Buffer) => {

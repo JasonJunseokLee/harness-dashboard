@@ -130,14 +130,18 @@ category color 배정:
         if (msg) send({ type: 'text', text: `▸ ${msg}\n` })
       })
       proc.on('close', (code: number) => {
+        if (!fs.existsSync(HARNESS)) fs.mkdirSync(HARNESS, { recursive: true })
+
+        // raw 출력 항상 저장
+        fs.writeFileSync(path.join(HARNESS, 'features.raw.txt'), accumulated, 'utf-8')
+
         try {
           const cleaned = accumulated.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
           const parsed = JSON.parse(cleaned)
-          if (!fs.existsSync(HARNESS)) fs.mkdirSync(HARNESS, { recursive: true })
           fs.writeFileSync(FEATURES_FILE, JSON.stringify(parsed, null, 2), 'utf-8')
           send({ type: 'done', code, features: parsed })
         } catch {
-          send({ type: 'done', code, error: 'JSON 파싱 실패' })
+          send({ type: 'done', code, error: 'JSON 파싱 실패 — features.raw.txt 를 확인하세요' })
         }
         controller.close()
       })

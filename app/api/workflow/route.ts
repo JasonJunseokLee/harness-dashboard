@@ -190,10 +190,14 @@ decision 노드 이후 엣지에만 label: "예" / "아니오".
         if (msg) send({ type: 'text', text: `▸ ${msg}\n` })
       })
       proc.on('close', () => {
+        if (!fs.existsSync(HARNESS)) fs.mkdirSync(HARNESS, { recursive: true })
+
+        // raw 출력 항상 저장
+        fs.writeFileSync(path.join(HARNESS, `workflow-${flowId}.raw.txt`), accumulated, 'utf-8')
+
         try {
           const cleaned = accumulated.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
           const parsed = JSON.parse(cleaned)
-          if (!fs.existsSync(HARNESS)) fs.mkdirSync(HARNESS, { recursive: true })
           const file = readWorkflowFile(WORKFLOW_FILE) ?? { flows: [] }
           const flowWithId = { ...parsed, id: flowId }
           const idx = file.flows.findIndex(f => f.id === flowId)
@@ -201,7 +205,7 @@ decision 노드 이후 엣지에만 label: "예" / "아니오".
           writeWorkflowFile(WORKFLOW_FILE, file)
           send({ type: 'done', flowId, flow: flowWithId })
         } catch {
-          send({ type: 'done', error: 'JSON 파싱 실패' })
+          send({ type: 'done', error: `JSON 파싱 실패 — workflow-${flowId}.raw.txt 를 확인하세요` })
         }
         close()
       })
