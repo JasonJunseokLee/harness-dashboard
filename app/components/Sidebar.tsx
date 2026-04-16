@@ -11,6 +11,10 @@ type Status = {
   workflow: boolean;
   setup: boolean;
   sprintPlan: boolean;
+  targetPath?: string;
+  projectName?: string;
+  harnessDir?: string;
+  isLinked?: boolean;
 };
 
 const NAV = [
@@ -85,8 +89,33 @@ export default function Sidebar() {
         })}
       </nav>
 
-      {/* 하단 — claude 연결 상태 */}
-      <div className="px-5 py-4 border-t border-zinc-800">
+      {/* 하단 — 연결된 프로젝트 경로 + claude 상태 */}
+      <div className="px-4 py-4 border-t border-zinc-800 space-y-3">
+        {/* 연결된 프로젝트 경로 */}
+        <div>
+          <div className="text-[10px] text-zinc-600 uppercase tracking-wider mb-1">저장 위치</div>
+          {status.isLinked && status.harnessDir ? (
+            /* 정상 연결 상태 */
+            <div title={status.harnessDir}>
+              <span className="font-semibold text-zinc-200 text-[11px]">{status.projectName}</span>
+              <span className="block text-zinc-600 text-[10px] mt-0.5 break-all leading-relaxed">
+                {status.harnessDir}
+              </span>
+            </div>
+          ) : (
+            /* 미연결 — fallback 경고 */
+            <div className="rounded-md bg-amber-950/60 border border-amber-800/50 px-2.5 py-2">
+              <div className="text-amber-400 text-[11px] font-semibold mb-1">⚠ 프로젝트 미연결</div>
+              <div className="text-zinc-500 text-[10px] leading-relaxed">
+                작업 결과가 대시보드 폴더에 저장됩니다.
+                <br />
+                프로젝트 폴더에서 <span className="text-zinc-300 font-mono">/harness</span> 를 실행하세요.
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Claude Code 연결 상태 */}
         <div className="flex items-center gap-2 text-xs text-zinc-600">
           <span className="w-1.5 h-1.5 rounded-full bg-green-500" />
           Claude Code 연결됨
