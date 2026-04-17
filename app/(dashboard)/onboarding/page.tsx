@@ -83,6 +83,7 @@ export default function OnboardingPage() {
   const [scanning, setScanning] = useState(false);
   const [scanDone, setScanDone] = useState(false);
   const [scanStream, setScanStream] = useState("");
+  const [scanThinking, setScanThinking] = useState(""); // Claude 추론 과정
   const [scanResult, setScanResult] = useState<ScanResult | null>(null);
   const [scanError, setScanError] = useState("");
 
@@ -123,6 +124,7 @@ export default function OnboardingPage() {
     setScanning(true);
     setScanDone(false);
     setScanStream("");
+    setScanThinking("");
     setScanResult(null);
     setScanError("");
     setStep("scan");
@@ -143,7 +145,8 @@ export default function OnboardingPage() {
         if (!line.startsWith("data: ")) continue;
         try {
           const ev = JSON.parse(line.slice(6));
-          if (ev.type === "text") setScanStream(p => p + ev.text);
+          if (ev.type === "thinking") setScanThinking(p => p + ev.text); // 추론 누적
+          if (ev.type === "text") setScanStream(p => p + ev.text);       // 실제 출력 누적
           if (ev.type === "done") {
             setScanDone(true);
             setScanning(false);
@@ -400,7 +403,13 @@ export default function OnboardingPage() {
               </p>
             </div>
             <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-4">
-              <TerminalStream active={scanning} done={scanDone} streamText={scanStream} />
+              <TerminalStream
+                active={scanning}
+                done={scanDone}
+                streamText={scanStream}
+                thinkingText={scanThinking || undefined}
+                height="h-56"
+              />
             </div>
           </div>
         )}

@@ -216,8 +216,8 @@ status 규칙:
 features는 10~20개로 구성하세요. 실제 코드에서 확인된 것만 "done"으로 표시하세요.`
 
   const enc = new TextEncoder()
-  let fullContent = ''
-  let lastSavedLength = 0
+  let fullContent = ''   // 최종 JSON 텍스트 (result 이벤트에서 확정)
+  let lineBuffer = ''    // JSON 라인 파싱용 버퍼
 
   const stream = new ReadableStream({
     start(controller) {
@@ -226,7 +226,10 @@ features는 10~20개로 구성하세요. 실제 코드에서 확인된 것만 "d
       }
       const close = () => { try { controller.close() } catch { /* already closed */ } }
 
-      const proc = spawn('claude', ['--print'], {
+      // --output-format stream-json --verbose: 줄 단위 JSON 스트림
+      // assistant 이벤트: thinking/text 블록을 실시간 스트리밍
+      // result 이벤트: 최종 완성 텍스트 (JSON 파싱에 사용)
+      const proc = spawn('claude', ['--output-format', 'stream-json', '--verbose', '--print'], {
         env: process.env,
         stdio: ['pipe', 'pipe', 'pipe'],
       })
@@ -234,20 +237,41 @@ features는 10~20개로 구성하세요. 실제 코드에서 확인된 것만 "d
       proc.stdin?.end()
 
       proc.stdout.on('data', (chunk: Buffer) => {
-        const text = chunk.toString()
-        fullContent += text
-        send({ type: 'text', text })
-        // 300자마다 중간 저장
-        if (fullContent.length - lastSavedLength > 300) {
-          if (!fs.existsSync(HARNESS)) fs.mkdirSync(HARNESS, { recursive: true })
-          fs.writeFileSync(RESULT_FILE, fullContent, 'utf-8')
-          lastSavedLength = fullContent.length
+        lineBuffer += chunk.toString()
+        const lines = lineBuffer.split('\n')
+        lineBuffer = lines.pop() ?? ''
+
+        for (const line of lines) {
+          const trimmed = line.trim()
+          if (!trimmed) continue
+          try {
+            const ev = JSON.parse(trimmed)
+
+            if (ev.type === 'assistant') {
+              // assistant 이벤트: content 배열에서 thinking/text 블록 추출
+              const content: Array<{type: string; thinking?: string; text?: string}> =
+                ev.message?.content ?? []
+              for (const block of content) {
+                if (block.type === 'thinking' && block.thinking) {
+                  send({ type: 'thinking', text: block.thinking })
+                } else if (block.type === 'text' && block.text) {
+                  send({ type: 'text', text: block.text })
+                }
+              }
+            } else if (ev.type === 'result') {
+              // result 이벤트: 최종 완성 텍스트 확정
+              fullContent = ev.result ?? ''
+              // 중간 raw 저장
+              if (!fs.existsSync(HARNESS)) fs.mkdirSync(HARNESS, { recursive: true })
+              fs.writeFileSync(RESULT_FILE, fullContent, 'utf-8')
+            }
+          } catch { /* JSON 파싱 실패 줄 무시 */ }
         }
       })
 
       proc.stderr.on('data', (chunk: Buffer) => {
         const msg = chunk.toString().trim()
-        if (msg) send({ type: 'text', text: `▸ ${msg}\n` })
+        if (msg) send({ type: 'status', text: `▸ ${msg}\n` })
       })
 
       proc.on('close', () => {
