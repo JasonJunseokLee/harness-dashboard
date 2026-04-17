@@ -37,8 +37,22 @@ type TechStack = {
   other: string;
 };
 
-// Step 순서: 1=컨텍스트, analysis=분석, 2=프로젝트설명, techstack=기술스택, 3=질문생성, 4=답변
-type Step = 1 | "analysis" | 2 | "techstack" | 3 | 4;
+// Step 순서: "mode"=시작모드선택, 1=컨텍스트, analysis=분석, 2=프로젝트설명, techstack=기술스택, 3=질문생성, 4=답변
+// 기존 프로젝트 모드: "mode" → "scan" → "scan-review"
+type Step = "mode" | "scan" | "scan-review" | 1 | "analysis" | 2 | "techstack" | 3 | 4;
+type OnboardingMode = "new" | "existing";
+
+// 코드베이스 스캔 결과 타입
+type ScanResult = {
+  projectName: string;
+  description: string;
+  techStack: TechStack;
+  completionEstimate: number;
+  prd: Record<string, unknown>;
+  features: Array<{ id: string; category: string; label: string; description: string; status: string; evidence: string }>;
+  devlogEntries: string[];
+  nextSuggestions: string[];
+};
 
 // ─── 기술 스택 선택 옵션 ──────────────────────────────────────
 const TECH_OPTIONS: Record<keyof Omit<TechStack, "other">, string[]> = {
@@ -62,7 +76,15 @@ const TECH_LABELS: Record<keyof Omit<TechStack, "other">, string> = {
 // ─── 메인 컴포넌트 ────────────────────────────────────────────
 export default function OnboardingPage() {
   const router = useRouter();
-  const [step, setStep] = useState<Step>(1);
+  const [step, setStep] = useState<Step>("mode");
+  const [mode, setMode] = useState<OnboardingMode>("new");
+
+  // 기존 프로젝트 스캔 상태
+  const [scanning, setScanning] = useState(false);
+  const [scanDone, setScanDone] = useState(false);
+  const [scanStream, setScanStream] = useState("");
+  const [scanResult, setScanResult] = useState<ScanResult | null>(null);
+  const [scanError, setScanError] = useState("");
 
   // Step 1: context 파일
   const [contextFiles, setContextFiles] = useState<ContextFile[]>([]);
@@ -95,6 +117,44 @@ export default function OnboardingPage() {
   const [answers, setAnswers] = useState<Record<string, string | string[]>>({});
   const [customInputs, setCustomInputs] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
+
+  // ─── 코드베이스 스캔 ──────────────────────────────────────────
+  async function runCodebaseScan() {
+    setScanning(true);
+    setScanDone(false);
+    setScanStream("");
+    setScanResult(null);
+    setScanError("");
+    setStep("scan");
+
+    const res = await fetch("/api/codebase-scan", { method: "POST" });
+    if (!res.ok || !res.body) { setScanError("스캔 실패"); setScanning(false); return; }
+
+    const reader = res.body.getReader();
+    const dec = new TextDecoder();
+    let buf = "";
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      const lines = buf.split("\n\n");
+      buf = lines.pop() ?? "";
+      for (const line of lines) {
+        if (!line.startsWith("data: ")) continue;
+        try {
+          const ev = JSON.parse(line.slice(6));
+          if (ev.type === "text") setScanStream(p => p + ev.text);
+          if (ev.type === "done") {
+            setScanDone(true);
+            setScanning(false);
+            if (ev.result) setScanResult(ev.result);
+            else if (ev.error) setScanError(ev.error);
+            setStep("scan-review");
+          }
+        } catch { /* 무시 */ }
+      }
+    }
+  }
 
   // context 파일 목록 로드
   useEffect(() => {
@@ -277,9 +337,11 @@ export default function OnboardingPage() {
     return q.type === "single" ? !!a : Array.isArray(a) && a.length > 0;
   });
 
-  // ─── 시각 단계 계산 (5단계) ──────────────────────────────
+  // ─── 시각 단계 계산 ───────────────────────────────────────
   const visualStep =
-    step === 1 ? 1
+    step === "mode" ? 0
+    : step === "scan" || step === "scan-review" ? 1
+    : step === 1 ? 1
     : step === "analysis" ? 1
     : step === 2 ? 2
     : step === "techstack" ? 3
@@ -290,7 +352,161 @@ export default function OnboardingPage() {
   return (
     <main className="min-h-screen bg-zinc-950 text-zinc-100 flex flex-col items-center justify-start py-12 px-4">
       <div className="w-full max-w-2xl">
-        {/* 헤더 */}
+
+        {/* ── STEP "mode": 시작 방법 선택 ── */}
+        {step === "mode" && (
+          <div className="space-y-8">
+            <div>
+              <h1 className="text-2xl font-bold text-zinc-100">어떻게 시작할까요?</h1>
+              <p className="text-zinc-500 text-sm mt-1">프로젝트 상황에 맞게 선택하세요</p>
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              {/* 새 프로젝트 */}
+              <button
+                onClick={() => { setMode("new"); setStep(1); }}
+                className="group text-left p-6 rounded-2xl border-2 border-zinc-800 hover:border-blue-600 bg-zinc-900 hover:bg-blue-950/20 transition-all"
+              >
+                <div className="text-3xl mb-3">🌱</div>
+                <div className="font-semibold text-zinc-100 mb-1">새 프로젝트</div>
+                <div className="text-xs text-zinc-500 leading-relaxed">
+                  아직 코드가 없는 프로젝트.<br />
+                  질문에 답하면 PRD·기능명세·스프린트 플랜을 처음부터 만들어 드립니다.
+                </div>
+              </button>
+
+              {/* 기존 프로젝트 */}
+              <button
+                onClick={() => { setMode("existing"); runCodebaseScan(); }}
+                className="group text-left p-6 rounded-2xl border-2 border-zinc-800 hover:border-purple-600 bg-zinc-900 hover:bg-purple-950/20 transition-all"
+              >
+                <div className="text-3xl mb-3">🔍</div>
+                <div className="font-semibold text-zinc-100 mb-1">기존 프로젝트 분석</div>
+                <div className="text-xs text-zinc-500 leading-relaxed">
+                  이미 개발 중인 프로젝트.<br />
+                  코드베이스를 분석해 현재 상태를 자동으로 파악하고, 이어서 작업할 수 있게 준비합니다.
+                </div>
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* ── STEP "scan": 코드베이스 분석 중 ── */}
+        {(step === "scan" || (step === "scan-review" && scanning)) && (
+          <div className="space-y-6">
+            <div>
+              <h2 className="text-lg font-semibold">코드베이스 분석 중...</h2>
+              <p className="text-zinc-500 text-sm mt-1">
+                파일 구조, git 히스토리, 기술 스택을 읽고 있습니다
+              </p>
+            </div>
+            <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-4">
+              <TerminalStream active={scanning} done={scanDone} streamText={scanStream} />
+            </div>
+          </div>
+        )}
+
+        {/* ── STEP "scan-review": 분석 결과 검토 ── */}
+        {step === "scan-review" && !scanning && (
+          <div className="space-y-6">
+            {scanError ? (
+              <div className="bg-red-950 border border-red-800 rounded-xl p-4 text-red-300 text-sm">
+                분석 실패: {scanError}
+                <button className="ml-4 underline" onClick={runCodebaseScan}>다시 시도</button>
+              </div>
+            ) : scanResult && (
+              <>
+                <div>
+                  <div className="flex items-center gap-3 mb-1">
+                    <h2 className="text-lg font-semibold">분석 완료</h2>
+                    <span className="text-xs bg-purple-950 text-purple-300 border border-purple-800 rounded-full px-2.5 py-0.5">
+                      {scanResult.completionEstimate}% 완성 추정
+                    </span>
+                  </div>
+                  <p className="text-zinc-500 text-sm">아래 내용을 확인하고 틀린 부분이 있으면 수정 후 확정하세요.</p>
+                </div>
+
+                {/* 프로젝트 설명 */}
+                <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-4 space-y-2">
+                  <div className="text-xs text-zinc-500 uppercase tracking-wider">프로젝트</div>
+                  <div className="font-semibold text-zinc-100">{scanResult.projectName}</div>
+                  <div className="text-sm text-zinc-400">{scanResult.description}</div>
+                </div>
+
+                {/* 기술 스택 */}
+                <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-4 space-y-2">
+                  <div className="text-xs text-zinc-500 uppercase tracking-wider mb-2">감지된 기술 스택</div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {[
+                      ...(scanResult.techStack.frontend ?? []),
+                      ...(scanResult.techStack.backend ?? []),
+                      ...(scanResult.techStack.styling ?? []),
+                      ...(scanResult.techStack.database ?? []),
+                    ].map(t => (
+                      <span key={t} className="px-2 py-0.5 rounded-full bg-zinc-800 text-zinc-300 text-xs">{t}</span>
+                    ))}
+                  </div>
+                </div>
+
+                {/* 기능 목록 (상태 포함) */}
+                <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-4 space-y-2">
+                  <div className="text-xs text-zinc-500 uppercase tracking-wider mb-2">
+                    감지된 기능 ({scanResult.features.length}개)
+                  </div>
+                  <div className="space-y-1.5 max-h-60 overflow-y-auto pr-1">
+                    {scanResult.features.map((f) => (
+                      <div key={f.id} className="flex items-start gap-2.5 text-sm">
+                        <span className={`mt-0.5 shrink-0 text-[10px] px-1.5 py-0.5 rounded-full font-medium ${
+                          f.status === 'done' ? 'bg-green-950 text-green-300'
+                          : f.status === 'in-progress' ? 'bg-blue-950 text-blue-300'
+                          : 'bg-zinc-800 text-zinc-500'
+                        }`}>
+                          {f.status === 'done' ? '완료' : f.status === 'in-progress' ? '진행' : '예정'}
+                        </span>
+                        <div>
+                          <span className="text-zinc-200">{f.label}</span>
+                          {f.evidence && <span className="text-zinc-600 text-xs ml-1.5">({f.evidence})</span>}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* 다음 제안 */}
+                {scanResult.nextSuggestions?.length > 0 && (
+                  <div className="bg-zinc-900 rounded-xl border border-zinc-800 p-4">
+                    <div className="text-xs text-zinc-500 uppercase tracking-wider mb-2">다음으로 추천</div>
+                    <ul className="space-y-1">
+                      {scanResult.nextSuggestions.map((s, i) => (
+                        <li key={i} className="text-sm text-zinc-400 flex gap-2">
+                          <span className="text-zinc-600">→</span>{s}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {/* 확정 버튼 */}
+                <div className="flex justify-between items-center pt-2">
+                  <button
+                    className="text-sm text-zinc-500 hover:text-zinc-300"
+                    onClick={runCodebaseScan}
+                  >
+                    다시 분석
+                  </button>
+                  <button
+                    className="px-6 py-2.5 bg-purple-600 hover:bg-purple-500 text-white rounded-lg text-sm font-medium transition-colors"
+                    onClick={() => router.push("/prd")}
+                  >
+                    이대로 시작하기 →
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        )}
+
+        {/* 헤더 (새 프로젝트 플로우) */}
+        {(step !== "mode" && step !== "scan" && step !== "scan-review") && (
         <div className="mb-10">
           <h1 className="text-2xl font-bold text-zinc-100">프로젝트 온보딩</h1>
           <p className="text-zinc-500 text-sm mt-1">기획 시작 전 프로젝트 맥락을 설정합니다</p>
@@ -319,6 +535,7 @@ export default function OnboardingPage() {
             ))}
           </div>
         </div>
+        )}
 
         {/* ── STEP 1: 컨텍스트 파일 ── */}
         {step === 1 && (
