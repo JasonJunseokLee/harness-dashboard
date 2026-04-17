@@ -13,6 +13,8 @@ import TerminalStream from "@/app/components/TerminalStream";
 import SparklesIcon from "@/app/components/SparklesIcon";
 import { ToastStack, type ToastMsg } from "@/app/components/Toast";
 import { useAI } from "@/app/context/AIContext";
+import StatusBadge, { type NodeStatus } from "@/app/components/StatusBadge";
+import { useDocumentStatus } from "@/app/hooks/useDocumentStatus";
 
 // ─── 타입 ─────────────────────────────────────────────────────
 type TreeNodeType = "root" | "category" | "feature" | "subfeature";
@@ -67,6 +69,8 @@ function buildFlow(
   onAIExpand: (parentId: string) => void,
   expandingNodeId: string | null,
   aiBorn: AIBornSet,
+  nodeStatuses: Record<string, { status: NodeStatus }>,
+  onStatusChange: (nodeId: string, status: NodeStatus) => void,
 ): { nodes: Node[]; edges: Edge[] } {
   const rfNodes: Node[] = data.treeNodes.map((tn) => {
     const color = getNodeColor(tn, data.treeNodes);
@@ -88,6 +92,8 @@ function buildFlow(
         onAIExpand,
         expanding: expandingNodeId === tn.id,
         aiBorn: isAIBorn,
+        nodeStatus: nodeStatuses[tn.id]?.status ?? 'todo',
+        onStatusChange,
       },
       className: isAIBorn ? "ai-node-fadein" : undefined,
       style: { width: NODE_W[tn.type], height: NODE_H[tn.type] },
@@ -185,6 +191,17 @@ function TreeNodeComponent({ id, data }: NodeProps) {
       {data.priority && (
         <div style={{ position: "absolute", top: 8, right: 8, width: 7, height: 7,
           borderRadius: "50%", background: PRIORITY_COLOR[data.priority] ?? "#6b7280" }} />
+      )}
+
+      {/* 구현 상태 배지 (feature / subfeature 전용) */}
+      {(type === "feature" || type === "subfeature") && (
+        <div style={{ position: "absolute", bottom: 6, left: 8 }} onClick={e => e.stopPropagation()}>
+          <StatusBadge
+            status={data.nodeStatus as string ?? 'todo'}
+            type="node"
+            onChange={(s) => (data.onStatusChange as (id: string, s: NodeStatus) => void)(id, s as NodeStatus)}
+          />
+        </div>
       )}
 
       {/* 호버 액션 버튼 (하위 추가 / 삭제) */}
@@ -291,6 +308,22 @@ export default function FeaturesPage() {
   const [data, setData] = useState<FeaturesData | null>(null);
   // 선택된 노드 ID
   const [selectedId, setSelectedId] = useState<string | null>(null);
+
+  // 기능 구현 상태 (features.status.json)
+  const { status: featStatus, update: updateFeatStatus } = useDocumentStatus('features');
+  const nodeStatuses = (featStatus?.nodes ?? {}) as Record<string, { status: NodeStatus }>;
+
+  // 노드 상태 변경 핸들러
+  const handleStatusChange = useCallback((nodeId: string, newStatus: NodeStatus) => {
+    const now = new Date().toISOString();
+    const existingNode = nodeStatuses[nodeId] ?? { status: 'todo', note: '', updatedAt: now };
+    updateFeatStatus({
+      nodes: {
+        ...nodeStatuses,
+        [nodeId]: { ...existingNode, status: newStatus, updatedAt: now },
+      },
+    } as Parameters<typeof updateFeatStatus>[0]);
+  }, [nodeStatuses, updateFeatStatus]);
   // 생성 중 상태
   const [generating, setGenerating] = useState(false);
   const [genDone, setGenDone] = useState(false);
@@ -330,6 +363,11 @@ export default function FeaturesPage() {
   }>({ addChild: () => {}, deleteNode: () => {}, expandWithAI: () => {} });
 
   // ── 트리 → Flow 동기화 ──────────────────────────────────────
+  const nodeStatusesRef = useRef(nodeStatuses);
+  useEffect(() => { nodeStatusesRef.current = nodeStatuses; }, [nodeStatuses]);
+  const handleStatusChangeRef = useRef(handleStatusChange);
+  useEffect(() => { handleStatusChangeRef.current = handleStatusChange; }, [handleStatusChange]);
+
   const syncFlow = useCallback(
     (d: FeaturesData, selId: string | null, expId: string | null = null) => {
       const { nodes: n, edges: e } = buildFlow(
@@ -340,6 +378,8 @@ export default function FeaturesPage() {
         (pid) => handlersRef.current.expandWithAI(pid),
         expId,
         aiBornRef.current,
+        nodeStatusesRef.current,
+        (nodeId, s) => handleStatusChangeRef.current(nodeId, s),
       );
       setNodes(n);
       setEdges(e);
@@ -558,6 +598,12 @@ export default function FeaturesPage() {
   useEffect(() => {
     handlersRef.current = { addChild, deleteNode, expandWithAI };
   }, [addChild, deleteNode, expandWithAI]);
+
+  // status가 바뀌면 flow 재동기화 (배지 색상 즉시 반영)
+  useEffect(() => {
+    if (data) syncFlow(data, selectedId);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [featStatus]);
 
   // ── 초기 로드 ───────────────────────────────────────────────
   useEffect(() => {

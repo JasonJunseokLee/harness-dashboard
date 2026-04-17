@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from "react";
 import TerminalStream from "@/app/components/TerminalStream";
 import { useAI } from "@/app/context/AIContext";
+import { useDocumentStatus } from "@/app/hooks/useDocumentStatus";
 
 // ─── 타입 ─────────────────────────────────────────────────────
 type MemoryFile = {
@@ -43,6 +44,7 @@ const SPRINT_PRESETS = [
 export default function SprintPlanPage() {
   // ── 스프린트 플랜 상태 ──────────────────────────────────────
   const [sprintPlan, setSprintPlan] = useState("");
+  const { status: sprintStatus, update: updateSprintStatus } = useDocumentStatus('sprint-plan');
   const [sprintExists, setSprintExists] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [genDone, setGenDone] = useState(false);
@@ -176,6 +178,44 @@ export default function SprintPlanPage() {
               />
             </div>
           )}
+
+          {/* 스프린트별 완료 체크 (## Sprint 또는 ### Sprint 헤더 파싱) */}
+          {sprintPlan && !generating && sprintStatus && (() => {
+            const sprintHeaders = [...sprintPlan.matchAll(/^#{2,3}\s+(Sprint\s*\d+[^\n]*)/gm)]
+              .map((m, i) => ({ key: `sprint_${i}`, label: m[1].trim() }));
+            if (sprintHeaders.length === 0) return null;
+            return (
+              <div className="mx-6 mb-4 flex flex-wrap gap-2">
+                {sprintHeaders.map(({ key, label }) => {
+                  const done = sprintStatus.sprints?.[key]?.done ?? false;
+                  return (
+                    <button
+                      key={key}
+                      onClick={() => {
+                        const now = new Date().toISOString();
+                        updateSprintStatus({
+                          sprints: {
+                            ...(sprintStatus.sprints ?? {}),
+                            [key]: { done: !done, note: sprintStatus.sprints?.[key]?.note ?? '', updatedAt: now },
+                          },
+                        } as Parameters<typeof updateSprintStatus>[0]);
+                      }}
+                      className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs border transition-colors ${
+                        done
+                          ? 'bg-green-950 border-green-800 text-green-300'
+                          : 'bg-zinc-800 border-zinc-700 text-zinc-400 hover:border-zinc-500'
+                      }`}
+                    >
+                      <span className={`w-3 h-3 rounded-sm border flex items-center justify-center ${done ? 'bg-green-500 border-green-500' : 'border-zinc-600'}`}>
+                        {done && <span className="text-white text-[8px] leading-none">✓</span>}
+                      </span>
+                      {label}
+                    </button>
+                  );
+                })}
+              </div>
+            );
+          })()}
 
           {/* 스프린트 플랜 콘텐츠 */}
           {sprintPlan && !generating && (

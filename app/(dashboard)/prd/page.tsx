@@ -4,6 +4,8 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import TerminalStream from "@/app/components/TerminalStream";
 import { useAI } from "@/app/context/AIContext";
+import { PrdStatusBanner } from "@/app/components/StatusBanner";
+import { useDocumentStatus } from "@/app/hooks/useDocumentStatus";
 
 // ─── 타입 ────────────────────────────────────────────────────
 type PRDData = {
@@ -141,6 +143,8 @@ export default function PRDPage() {
   const [error, setError] = useState("");
   const [hasProject, setHasProject] = useState(true);
 
+  // PRD 상태 (drift 노트, 재검토 여부)
+  const { status: prdStatus, update: updatePrdStatus } = useDocumentStatus('prd');
 
   // 글로벌 AI Context
   const { setPhase, setPresets, setCurrentContent, registerContentUpdater, unregisterContentUpdater } = useAI();
@@ -257,6 +261,22 @@ export default function PRDPage() {
           <div className="bg-red-950 border border-red-800 rounded-xl p-4 mb-6 text-red-300 text-sm">
             {error}
           </div>
+        )}
+
+        {/* PRD 상태 배너 (생성된 PRD가 있을 때만 표시) */}
+        {prd && !generating && prdStatus && (
+          <PrdStatusBanner
+            needsReview={prdStatus.needsReview}
+            driftNotes={prdStatus.driftNotes}
+            onToggleReview={(v) => updatePrdStatus({ needsReview: v } as Parameters<typeof updatePrdStatus>[0])}
+            onAddDrift={(note) => {
+              const newNote = { id: `drift_${Date.now()}`, createdAt: new Date().toISOString(), ...note };
+              updatePrdStatus({ driftNotes: [...(prdStatus.driftNotes ?? []), newNote] } as Parameters<typeof updatePrdStatus>[0]);
+            }}
+            onRemoveDrift={(id) => {
+              updatePrdStatus({ driftNotes: prdStatus.driftNotes.filter(d => d.id !== id) } as Parameters<typeof updatePrdStatus>[0]);
+            }}
+          />
         )}
 
         {/* PRD 뷰어 */}

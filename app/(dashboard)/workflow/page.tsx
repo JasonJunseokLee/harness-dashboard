@@ -13,6 +13,8 @@ import TerminalStream from "@/app/components/TerminalStream";
 import SparklesIcon from "@/app/components/SparklesIcon";
 import { ToastStack, type ToastMsg } from "@/app/components/Toast";
 import { useAI } from "@/app/context/AIContext";
+import { SimpleStatusBanner } from "@/app/components/StatusBanner";
+import { useDocumentStatus, type FlowStatus } from "@/app/hooks/useDocumentStatus";
 
 // ─── 타입 ─────────────────────────────────────────────────────
 type WFNodeType = "start" | "end" | "action" | "decision" | "system";
@@ -181,6 +183,9 @@ function Legend() {
 export default function WorkflowPage() {
   const router = useRouter();
   const { setPhase, setPresets, setCurrentContent, registerContentUpdater, unregisterContentUpdater } = useAI();
+
+  // ── 워크플로우 구현 상태 ─────────────────────────────────────
+  const { status: wfStatus, update: updateWfStatus } = useDocumentStatus('workflow');
 
   // ── 멀티 플로우 상태 ─────────────────────────────────────────
   const [flows, setFlows] = useState<FlowData[]>([]);
@@ -673,6 +678,24 @@ export default function WorkflowPage() {
             )}
           </div>
         </div>
+
+        {/* 현재 플로우 구현 상태 배너 */}
+        {activeFlow && wfStatus && (
+          <SimpleStatusBanner
+            label={activeFlow.title}
+            status={(wfStatus.flows?.[activeFlow.id]?.status ?? 'todo') as FlowStatus}
+            note={wfStatus.flows?.[activeFlow.id]?.note}
+            onChange={(s, note) => {
+              const now = new Date().toISOString();
+              updateWfStatus({
+                flows: {
+                  ...(wfStatus.flows ?? {}),
+                  [activeFlow.id]: { status: s, note: note ?? '', updatedAt: now },
+                },
+              } as Parameters<typeof updateWfStatus>[0]);
+            }}
+          />
+        )}
 
         {/* 탭 바 */}
         <div className="shrink-0 flex items-center gap-0.5 px-3 py-2 border-b border-zinc-800 bg-zinc-900/30 overflow-x-auto">
